@@ -1,60 +1,49 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import type { Raeume, Dozenten, Kurse, Teilnehmer, Anmeldungen } from '@/types/app';
 import { APP_IDS } from '@/types/app';
 import { LivingAppsService, extractRecordId, createRecordUrl } from '@/services/livingAppsService';
-import { format, parseISO } from 'date-fns';
+import { format, parseISO, formatDistance } from 'date-fns';
 import { de } from 'date-fns/locale';
-import { toast, Toaster } from 'sonner';
+import { toast } from 'sonner';
+import {
+  BookOpen, GraduationCap, DoorOpen, Users, Euro,
+  Plus, Pencil, Trash2, AlertCircle, RefreshCw,
+} from 'lucide-react';
+import {
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
+} from 'recharts';
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select';
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from '@/components/ui/dialog';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-
 import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-  Cell,
-} from 'recharts';
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+} from '@/components/ui/table';
 
-import {
-  Plus,
-  Pencil,
-  Trash2,
-  BookOpen,
-  AlertCircle,
-  Users,
-  RefreshCw,
-} from 'lucide-react';
+// ─── Utility functions ───────────────────────────────────────────────
 
-import { useIsMobile } from '@/hooks/use-mobile';
+function formatCurrency(value: number | null | undefined): string {
+  if (value == null) return '–';
+  return new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(value);
+}
 
-// ─── Helpers ───────────────────────────────────────────────
-
-function formatDate(dateStr: string | undefined | null): string {
+function formatDate(dateStr: string | null | undefined): string {
   if (!dateStr) return '–';
   try {
     return format(parseISO(dateStr.split('T')[0]), 'dd.MM.yyyy', { locale: de });
@@ -63,35 +52,48 @@ function formatDate(dateStr: string | undefined | null): string {
   }
 }
 
-function formatCurrency(value: number | undefined | null): string {
-  if (value == null) return '–';
-  return new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(value);
+function relativeDate(dateStr: string | null | undefined): string {
+  if (!dateStr) return '–';
+  try {
+    return formatDistance(parseISO(dateStr.split('T')[0]), new Date(), { addSuffix: true, locale: de });
+  } catch {
+    return dateStr;
+  }
 }
 
 function todayStr(): string {
   return format(new Date(), 'yyyy-MM-dd');
 }
 
-// ─── Delete Confirmation Dialog ────────────────────────────
+// ─── Progress Ring SVG ───────────────────────────────────────────────
 
-function DeleteConfirmDialog({
-  open,
-  onOpenChange,
-  recordName,
-  onConfirm,
-}: {
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
-  recordName: string;
-  onConfirm: () => Promise<void>;
+function ProgressRing({ percent, size = 160, stroke = 6 }: { percent: number; size?: number; stroke?: number }) {
+  const radius = (size - stroke) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const offset = circumference - (Math.min(percent, 100) / 100) * circumference;
+  return (
+    <svg width={size} height={size} className="transform -rotate-90">
+      <circle cx={size / 2} cy={size / 2} r={radius} fill="none"
+        stroke="hsl(40 15% 90%)" strokeWidth={stroke} />
+      <circle cx={size / 2} cy={size / 2} r={radius} fill="none"
+        stroke="hsl(178 45% 30%)" strokeWidth={stroke}
+        strokeDasharray={circumference} strokeDashoffset={offset}
+        strokeLinecap="round" className="transition-all duration-700 ease-out" />
+    </svg>
+  );
+}
+
+// ─── Delete Confirm Dialog ───────────────────────────────────────────
+
+function DeleteConfirmDialog({ open, onOpenChange, name, onConfirm }: {
+  open: boolean; onOpenChange: (o: boolean) => void; name: string; onConfirm: () => Promise<void>;
 }) {
   const [deleting, setDeleting] = useState(false);
-
   async function handleDelete() {
     setDeleting(true);
     try {
       await onConfirm();
-      toast.success(`"${recordName}" wurde gelöscht.`);
+      toast.success(`"${name}" wurde gelöscht.`);
       onOpenChange(false);
     } catch {
       toast.error('Eintrag konnte nicht gelöscht werden.');
@@ -99,24 +101,19 @@ function DeleteConfirmDialog({
       setDeleting(false);
     }
   }
-
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Eintrag löschen?</AlertDialogTitle>
           <AlertDialogDescription>
-            Möchtest du &quot;{recordName}&quot; wirklich löschen? Diese Aktion kann nicht
-            rückgängig gemacht werden.
+            Möchtest du &quot;{name}&quot; wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>Abbrechen</AlertDialogCancel>
-          <AlertDialogAction
-            onClick={handleDelete}
-            disabled={deleting}
-            className="bg-destructive text-white hover:bg-destructive/90"
-          >
+          <AlertDialogAction onClick={handleDelete} disabled={deleting}
+            className="bg-destructive text-white hover:bg-destructive/90">
             {deleting ? 'Löscht...' : 'Löschen'}
           </AlertDialogAction>
         </AlertDialogFooter>
@@ -125,53 +122,45 @@ function DeleteConfirmDialog({
   );
 }
 
-// ─── Räume CRUD Dialog ─────────────────────────────────────
+// ─── Räume CRUD Dialog ───────────────────────────────────────────────
 
-function RaeumeDialog({
-  open,
-  onOpenChange,
-  record,
-  onSuccess,
-}: {
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
-  record: Raeume | null;
-  onSuccess: () => void;
+function RaeumeDialog({ open, onOpenChange, record, onSuccess }: {
+  open: boolean; onOpenChange: (o: boolean) => void; record?: Raeume | null; onSuccess: () => void;
 }) {
-  const isEditing = !!record;
+  const isEdit = !!record;
   const [submitting, setSubmitting] = useState(false);
-  const [raumname, setRaumname] = useState('');
-  const [gebaeude, setGebaeude] = useState('');
-  const [kapazitaet, setKapazitaet] = useState('');
+  const [form, setForm] = useState({ raumname: '', gebaeude: '', kapazitaet: '' });
 
   useEffect(() => {
     if (open) {
-      setRaumname(record?.fields.raumname ?? '');
-      setGebaeude(record?.fields.gebaeude ?? '');
-      setKapazitaet(record?.fields.kapazitaet?.toString() ?? '');
+      setForm({
+        raumname: record?.fields.raumname ?? '',
+        gebaeude: record?.fields.gebaeude ?? '',
+        kapazitaet: record?.fields.kapazitaet?.toString() ?? '',
+      });
     }
   }, [open, record]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitting(true);
+    const fields = {
+      raumname: form.raumname,
+      gebaeude: form.gebaeude,
+      kapazitaet: form.kapazitaet ? Number(form.kapazitaet) : undefined,
+    };
     try {
-      const fields: Raeume['fields'] = {
-        raumname,
-        gebaeude: gebaeude || undefined,
-        kapazitaet: kapazitaet ? Number(kapazitaet) : undefined,
-      };
-      if (isEditing) {
+      if (isEdit) {
         await LivingAppsService.updateRaeumeEntry(record!.record_id, fields);
-        toast.success('Raum wurde aktualisiert.');
+        toast.success('Raum aktualisiert.');
       } else {
         await LivingAppsService.createRaeumeEntry(fields);
-        toast.success('Raum wurde erstellt.');
+        toast.success('Raum erstellt.');
       }
       onOpenChange(false);
       onSuccess();
     } catch {
-      toast.error(`Fehler beim ${isEditing ? 'Speichern' : 'Erstellen'}.`);
+      toast.error(`Fehler beim ${isEdit ? 'Speichern' : 'Erstellen'}.`);
     } finally {
       setSubmitting(false);
     }
@@ -181,24 +170,24 @@ function RaeumeDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>{isEditing ? 'Raum bearbeiten' : 'Neuer Raum'}</DialogTitle>
+          <DialogTitle>{isEdit ? 'Raum bearbeiten' : 'Neuer Raum'}</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="raumname">Raumname *</Label>
-            <Input id="raumname" value={raumname} onChange={e => setRaumname(e.target.value)} required />
+            <Label htmlFor="raumname">Raumname</Label>
+            <Input id="raumname" value={form.raumname} onChange={e => setForm(p => ({ ...p, raumname: e.target.value }))} required />
           </div>
           <div className="space-y-2">
             <Label htmlFor="gebaeude">Gebäude</Label>
-            <Input id="gebaeude" value={gebaeude} onChange={e => setGebaeude(e.target.value)} />
+            <Input id="gebaeude" value={form.gebaeude} onChange={e => setForm(p => ({ ...p, gebaeude: e.target.value }))} />
           </div>
           <div className="space-y-2">
             <Label htmlFor="kapazitaet">Kapazität</Label>
-            <Input id="kapazitaet" type="number" min={0} value={kapazitaet} onChange={e => setKapazitaet(e.target.value)} />
+            <Input id="kapazitaet" type="number" value={form.kapazitaet} onChange={e => setForm(p => ({ ...p, kapazitaet: e.target.value }))} />
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Abbrechen</Button>
-            <Button type="submit" disabled={submitting}>{submitting ? 'Speichert...' : isEditing ? 'Speichern' : 'Erstellen'}</Button>
+            <Button type="submit" disabled={submitting}>{submitting ? 'Speichert...' : (isEdit ? 'Speichern' : 'Erstellen')}</Button>
           </DialogFooter>
         </form>
       </DialogContent>
@@ -206,34 +195,24 @@ function RaeumeDialog({
   );
 }
 
-// ─── Dozenten CRUD Dialog ──────────────────────────────────
+// ─── Dozenten CRUD Dialog ────────────────────────────────────────────
 
-function DozentenDialog({
-  open,
-  onOpenChange,
-  record,
-  onSuccess,
-}: {
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
-  record: Dozenten | null;
-  onSuccess: () => void;
+function DozentenDialog({ open, onOpenChange, record, onSuccess }: {
+  open: boolean; onOpenChange: (o: boolean) => void; record?: Dozenten | null; onSuccess: () => void;
 }) {
-  const isEditing = !!record;
+  const isEdit = !!record;
   const [submitting, setSubmitting] = useState(false);
-  const [firstname, setFirstname] = useState('');
-  const [lastname, setLastname] = useState('');
-  const [email, setEmail] = useState('');
-  const [telefon, setTelefon] = useState('');
-  const [fachgebiet, setFachgebiet] = useState('');
+  const [form, setForm] = useState({ dozent_firstname: '', dozent_lastname: '', email: '', telefon: '', fachgebiet: '' });
 
   useEffect(() => {
     if (open) {
-      setFirstname(record?.fields.dozent_firstname ?? '');
-      setLastname(record?.fields.dozent_lastname ?? '');
-      setEmail(record?.fields.email ?? '');
-      setTelefon(record?.fields.telefon ?? '');
-      setFachgebiet(record?.fields.fachgebiet ?? '');
+      setForm({
+        dozent_firstname: record?.fields.dozent_firstname ?? '',
+        dozent_lastname: record?.fields.dozent_lastname ?? '',
+        email: record?.fields.email ?? '',
+        telefon: record?.fields.telefon ?? '',
+        fachgebiet: record?.fields.fachgebiet ?? '',
+      });
     }
   }, [open, record]);
 
@@ -241,24 +220,17 @@ function DozentenDialog({
     e.preventDefault();
     setSubmitting(true);
     try {
-      const fields: Dozenten['fields'] = {
-        dozent_firstname: firstname,
-        dozent_lastname: lastname,
-        email: email || undefined,
-        telefon: telefon || undefined,
-        fachgebiet: fachgebiet || undefined,
-      };
-      if (isEditing) {
-        await LivingAppsService.updateDozentenEntry(record!.record_id, fields);
-        toast.success('Dozent wurde aktualisiert.');
+      if (isEdit) {
+        await LivingAppsService.updateDozentenEntry(record!.record_id, form);
+        toast.success('Dozent aktualisiert.');
       } else {
-        await LivingAppsService.createDozentenEntry(fields);
-        toast.success('Dozent wurde erstellt.');
+        await LivingAppsService.createDozentenEntry(form);
+        toast.success('Dozent erstellt.');
       }
       onOpenChange(false);
       onSuccess();
     } catch {
-      toast.error(`Fehler beim ${isEditing ? 'Speichern' : 'Erstellen'}.`);
+      toast.error(`Fehler beim ${isEdit ? 'Speichern' : 'Erstellen'}.`);
     } finally {
       setSubmitting(false);
     }
@@ -268,34 +240,34 @@ function DozentenDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>{isEditing ? 'Dozent bearbeiten' : 'Neuer Dozent'}</DialogTitle>
+          <DialogTitle>{isEdit ? 'Dozent bearbeiten' : 'Neuer Dozent'}</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="d-firstname">Vorname *</Label>
-              <Input id="d-firstname" value={firstname} onChange={e => setFirstname(e.target.value)} required />
+              <Label htmlFor="d_fn">Vorname</Label>
+              <Input id="d_fn" value={form.dozent_firstname} onChange={e => setForm(p => ({ ...p, dozent_firstname: e.target.value }))} required />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="d-lastname">Nachname *</Label>
-              <Input id="d-lastname" value={lastname} onChange={e => setLastname(e.target.value)} required />
+              <Label htmlFor="d_ln">Nachname</Label>
+              <Input id="d_ln" value={form.dozent_lastname} onChange={e => setForm(p => ({ ...p, dozent_lastname: e.target.value }))} required />
             </div>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="d-email">E-Mail</Label>
-            <Input id="d-email" type="email" value={email} onChange={e => setEmail(e.target.value)} />
+            <Label htmlFor="d_email">E-Mail</Label>
+            <Input id="d_email" type="email" value={form.email} onChange={e => setForm(p => ({ ...p, email: e.target.value }))} />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="d-telefon">Telefon</Label>
-            <Input id="d-telefon" type="tel" value={telefon} onChange={e => setTelefon(e.target.value)} />
+            <Label htmlFor="d_tel">Telefon</Label>
+            <Input id="d_tel" type="tel" value={form.telefon} onChange={e => setForm(p => ({ ...p, telefon: e.target.value }))} />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="d-fachgebiet">Fachgebiet</Label>
-            <Input id="d-fachgebiet" value={fachgebiet} onChange={e => setFachgebiet(e.target.value)} />
+            <Label htmlFor="d_fg">Fachgebiet</Label>
+            <Input id="d_fg" value={form.fachgebiet} onChange={e => setForm(p => ({ ...p, fachgebiet: e.target.value }))} />
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Abbrechen</Button>
-            <Button type="submit" disabled={submitting}>{submitting ? 'Speichert...' : isEditing ? 'Speichern' : 'Erstellen'}</Button>
+            <Button type="submit" disabled={submitting}>{submitting ? 'Speichert...' : (isEdit ? 'Speichern' : 'Erstellen')}</Button>
           </DialogFooter>
         </form>
       </DialogContent>
@@ -303,72 +275,59 @@ function DozentenDialog({
   );
 }
 
-// ─── Kurse CRUD Dialog ─────────────────────────────────────
+// ─── Kurse CRUD Dialog ───────────────────────────────────────────────
 
-function KurseDialog({
-  open,
-  onOpenChange,
-  record,
-  onSuccess,
-  raeume,
-  dozenten,
-}: {
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
-  record: Kurse | null;
-  onSuccess: () => void;
-  raeume: Raeume[];
-  dozenten: Dozenten[];
+function KurseDialog({ open, onOpenChange, record, onSuccess, raeume, dozenten }: {
+  open: boolean; onOpenChange: (o: boolean) => void; record?: Kurse | null; onSuccess: () => void;
+  raeume: Raeume[]; dozenten: Dozenten[];
 }) {
-  const isEditing = !!record;
+  const isEdit = !!record;
   const [submitting, setSubmitting] = useState(false);
-  const [titel, setTitel] = useState('');
-  const [beschreibung, setBeschreibung] = useState('');
-  const [startdatum, setStartdatum] = useState('');
-  const [enddatum, setEnddatum] = useState('');
-  const [maxTeilnehmer, setMaxTeilnehmer] = useState('');
-  const [preis, setPreis] = useState('');
-  const [raumId, setRaumId] = useState('');
-  const [dozentId, setDozentId] = useState('');
+  const [form, setForm] = useState({
+    titel: '', beschreibung: '', startdatum: '', enddatum: '',
+    max_teilnehmer: '', preis: '', raum: 'none', dozent: 'none',
+  });
 
   useEffect(() => {
     if (open) {
-      setTitel(record?.fields.titel ?? '');
-      setBeschreibung(record?.fields.beschreibung ?? '');
-      setStartdatum(record?.fields.startdatum?.split('T')[0] ?? '');
-      setEnddatum(record?.fields.enddatum?.split('T')[0] ?? '');
-      setMaxTeilnehmer(record?.fields.max_teilnehmer?.toString() ?? '');
-      setPreis(record?.fields.preis?.toString() ?? '');
-      setRaumId(extractRecordId(record?.fields.raum) ?? '');
-      setDozentId(extractRecordId(record?.fields.dozent) ?? '');
+      setForm({
+        titel: record?.fields.titel ?? '',
+        beschreibung: record?.fields.beschreibung ?? '',
+        startdatum: record?.fields.startdatum?.split('T')[0] ?? '',
+        enddatum: record?.fields.enddatum?.split('T')[0] ?? '',
+        max_teilnehmer: record?.fields.max_teilnehmer?.toString() ?? '',
+        preis: record?.fields.preis?.toString() ?? '',
+        raum: extractRecordId(record?.fields.raum) ?? 'none',
+        dozent: extractRecordId(record?.fields.dozent) ?? 'none',
+      });
     }
   }, [open, record]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitting(true);
+    const fields: Kurse['fields'] = {
+      titel: form.titel,
+      beschreibung: form.beschreibung || undefined,
+      startdatum: form.startdatum || undefined,
+      enddatum: form.enddatum || undefined,
+      max_teilnehmer: form.max_teilnehmer ? Number(form.max_teilnehmer) : undefined,
+      preis: form.preis ? Number(form.preis) : undefined,
+      raum: form.raum !== 'none' ? createRecordUrl(APP_IDS.RAEUME, form.raum) : undefined,
+      dozent: form.dozent !== 'none' ? createRecordUrl(APP_IDS.DOZENTEN, form.dozent) : undefined,
+    };
     try {
-      const fields: Kurse['fields'] = {
-        titel,
-        beschreibung: beschreibung || undefined,
-        startdatum: startdatum || undefined,
-        enddatum: enddatum || undefined,
-        max_teilnehmer: maxTeilnehmer ? Number(maxTeilnehmer) : undefined,
-        preis: preis ? Number(preis) : undefined,
-        raum: raumId && raumId !== 'none' ? createRecordUrl(APP_IDS.RAEUME, raumId) : undefined,
-        dozent: dozentId && dozentId !== 'none' ? createRecordUrl(APP_IDS.DOZENTEN, dozentId) : undefined,
-      };
-      if (isEditing) {
+      if (isEdit) {
         await LivingAppsService.updateKurseEntry(record!.record_id, fields);
-        toast.success('Kurs wurde aktualisiert.');
+        toast.success('Kurs aktualisiert.');
       } else {
         await LivingAppsService.createKurseEntry(fields);
-        toast.success('Kurs wurde erstellt.');
+        toast.success('Kurs erstellt.');
       }
       onOpenChange(false);
       onSuccess();
     } catch {
-      toast.error(`Fehler beim ${isEditing ? 'Speichern' : 'Erstellen'}.`);
+      toast.error(`Fehler beim ${isEdit ? 'Speichern' : 'Erstellen'}.`);
     } finally {
       setSubmitting(false);
     }
@@ -378,58 +337,60 @@ function KurseDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>{isEditing ? 'Kurs bearbeiten' : 'Neuer Kurs'}</DialogTitle>
+          <DialogTitle>{isEdit ? 'Kurs bearbeiten' : 'Neuer Kurs'}</DialogTitle>
         </DialogHeader>
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
           <div className="space-y-2">
-            <Label htmlFor="k-titel">Kurstitel *</Label>
-            <Input id="k-titel" value={titel} onChange={e => setTitel(e.target.value)} required />
+            <Label htmlFor="k_titel">Kurstitel</Label>
+            <Input id="k_titel" value={form.titel} onChange={e => setForm(p => ({ ...p, titel: e.target.value }))} required />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="k-beschreibung">Beschreibung</Label>
-            <Textarea id="k-beschreibung" value={beschreibung} onChange={e => setBeschreibung(e.target.value)} rows={3} />
+            <Label htmlFor="k_beschr">Beschreibung</Label>
+            <Textarea id="k_beschr" value={form.beschreibung} onChange={e => setForm(p => ({ ...p, beschreibung: e.target.value }))} rows={3} />
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="k-start">Startdatum</Label>
-              <Input id="k-start" type="date" value={startdatum} onChange={e => setStartdatum(e.target.value)} />
+              <Label htmlFor="k_start">Startdatum</Label>
+              <Input id="k_start" type="date" value={form.startdatum} onChange={e => setForm(p => ({ ...p, startdatum: e.target.value }))} />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="k-end">Enddatum</Label>
-              <Input id="k-end" type="date" value={enddatum} onChange={e => setEnddatum(e.target.value)} />
+              <Label htmlFor="k_end">Enddatum</Label>
+              <Input id="k_end" type="date" value={form.enddatum} onChange={e => setForm(p => ({ ...p, enddatum: e.target.value }))} />
             </div>
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="k-max">Max. Teilnehmer</Label>
-              <Input id="k-max" type="number" min={0} value={maxTeilnehmer} onChange={e => setMaxTeilnehmer(e.target.value)} />
+              <Label htmlFor="k_max">Max. Teilnehmer</Label>
+              <Input id="k_max" type="number" value={form.max_teilnehmer} onChange={e => setForm(p => ({ ...p, max_teilnehmer: e.target.value }))} />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="k-preis">Preis (EUR)</Label>
-              <Input id="k-preis" type="number" min={0} step={0.01} value={preis} onChange={e => setPreis(e.target.value)} />
+              <Label htmlFor="k_preis">Preis (EUR)</Label>
+              <Input id="k_preis" type="number" step="0.01" value={form.preis} onChange={e => setForm(p => ({ ...p, preis: e.target.value }))} />
             </div>
           </div>
           <div className="space-y-2">
             <Label>Raum</Label>
-            <Select value={raumId || 'none'} onValueChange={v => setRaumId(v === 'none' ? '' : v)}>
-              <SelectTrigger><SelectValue placeholder="Raum auswählen..." /></SelectTrigger>
+            <Select value={form.raum} onValueChange={v => setForm(p => ({ ...p, raum: v }))}>
+              <SelectTrigger className="w-full"><SelectValue placeholder="Raum wählen..." /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">Kein Raum</SelectItem>
                 {raeume.map(r => (
-                  <SelectItem key={r.record_id} value={r.record_id}>{r.fields.raumname ?? '–'}</SelectItem>
+                  <SelectItem key={r.record_id} value={r.record_id}>
+                    {r.fields.raumname ?? 'Unbenannt'}{r.fields.gebaeude ? ` (${r.fields.gebaeude})` : ''}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
           <div className="space-y-2">
             <Label>Dozent</Label>
-            <Select value={dozentId || 'none'} onValueChange={v => setDozentId(v === 'none' ? '' : v)}>
-              <SelectTrigger><SelectValue placeholder="Dozent auswählen..." /></SelectTrigger>
+            <Select value={form.dozent} onValueChange={v => setForm(p => ({ ...p, dozent: v }))}>
+              <SelectTrigger className="w-full"><SelectValue placeholder="Dozent wählen..." /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">Kein Dozent</SelectItem>
                 {dozenten.map(d => (
                   <SelectItem key={d.record_id} value={d.record_id}>
-                    {[d.fields.dozent_firstname, d.fields.dozent_lastname].filter(Boolean).join(' ') || '–'}
+                    {d.fields.dozent_firstname ?? ''} {d.fields.dozent_lastname ?? ''}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -437,7 +398,7 @@ function KurseDialog({
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Abbrechen</Button>
-            <Button type="submit" disabled={submitting}>{submitting ? 'Speichert...' : isEditing ? 'Speichern' : 'Erstellen'}</Button>
+            <Button type="submit" disabled={submitting}>{submitting ? 'Speichert...' : (isEdit ? 'Speichern' : 'Erstellen')}</Button>
           </DialogFooter>
         </form>
       </DialogContent>
@@ -445,59 +406,49 @@ function KurseDialog({
   );
 }
 
-// ─── Teilnehmer CRUD Dialog ────────────────────────────────
+// ─── Teilnehmer CRUD Dialog ─────────────────────────────────────────
 
-function TeilnehmerDialog({
-  open,
-  onOpenChange,
-  record,
-  onSuccess,
-}: {
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
-  record: Teilnehmer | null;
-  onSuccess: () => void;
+function TeilnehmerDialog({ open, onOpenChange, record, onSuccess }: {
+  open: boolean; onOpenChange: (o: boolean) => void; record?: Teilnehmer | null; onSuccess: () => void;
 }) {
-  const isEditing = !!record;
+  const isEdit = !!record;
   const [submitting, setSubmitting] = useState(false);
-  const [firstname, setFirstname] = useState('');
-  const [lastname, setLastname] = useState('');
-  const [email, setEmail] = useState('');
-  const [telefon, setTelefon] = useState('');
-  const [geburtsdatum, setGeburtsdatum] = useState('');
+  const [form, setForm] = useState({ teilnehmer_firstname: '', teilnehmer_lastname: '', email: '', telefon: '', geburtsdatum: '' });
 
   useEffect(() => {
     if (open) {
-      setFirstname(record?.fields.teilnehmer_firstname ?? '');
-      setLastname(record?.fields.teilnehmer_lastname ?? '');
-      setEmail(record?.fields.email ?? '');
-      setTelefon(record?.fields.telefon ?? '');
-      setGeburtsdatum(record?.fields.geburtsdatum?.split('T')[0] ?? '');
+      setForm({
+        teilnehmer_firstname: record?.fields.teilnehmer_firstname ?? '',
+        teilnehmer_lastname: record?.fields.teilnehmer_lastname ?? '',
+        email: record?.fields.email ?? '',
+        telefon: record?.fields.telefon ?? '',
+        geburtsdatum: record?.fields.geburtsdatum?.split('T')[0] ?? '',
+      });
     }
   }, [open, record]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitting(true);
+    const fields: Teilnehmer['fields'] = {
+      teilnehmer_firstname: form.teilnehmer_firstname,
+      teilnehmer_lastname: form.teilnehmer_lastname,
+      email: form.email || undefined,
+      telefon: form.telefon || undefined,
+      geburtsdatum: form.geburtsdatum || undefined,
+    };
     try {
-      const fields: Teilnehmer['fields'] = {
-        teilnehmer_firstname: firstname,
-        teilnehmer_lastname: lastname,
-        email: email || undefined,
-        telefon: telefon || undefined,
-        geburtsdatum: geburtsdatum || undefined,
-      };
-      if (isEditing) {
+      if (isEdit) {
         await LivingAppsService.updateTeilnehmerEntry(record!.record_id, fields);
-        toast.success('Teilnehmer wurde aktualisiert.');
+        toast.success('Teilnehmer aktualisiert.');
       } else {
         await LivingAppsService.createTeilnehmerEntry(fields);
-        toast.success('Teilnehmer wurde erstellt.');
+        toast.success('Teilnehmer erstellt.');
       }
       onOpenChange(false);
       onSuccess();
     } catch {
-      toast.error(`Fehler beim ${isEditing ? 'Speichern' : 'Erstellen'}.`);
+      toast.error(`Fehler beim ${isEdit ? 'Speichern' : 'Erstellen'}.`);
     } finally {
       setSubmitting(false);
     }
@@ -507,34 +458,34 @@ function TeilnehmerDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>{isEditing ? 'Teilnehmer bearbeiten' : 'Neuer Teilnehmer'}</DialogTitle>
+          <DialogTitle>{isEdit ? 'Teilnehmer bearbeiten' : 'Neuer Teilnehmer'}</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="t-firstname">Vorname *</Label>
-              <Input id="t-firstname" value={firstname} onChange={e => setFirstname(e.target.value)} required />
+              <Label htmlFor="t_fn">Vorname</Label>
+              <Input id="t_fn" value={form.teilnehmer_firstname} onChange={e => setForm(p => ({ ...p, teilnehmer_firstname: e.target.value }))} required />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="t-lastname">Nachname *</Label>
-              <Input id="t-lastname" value={lastname} onChange={e => setLastname(e.target.value)} required />
+              <Label htmlFor="t_ln">Nachname</Label>
+              <Input id="t_ln" value={form.teilnehmer_lastname} onChange={e => setForm(p => ({ ...p, teilnehmer_lastname: e.target.value }))} required />
             </div>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="t-email">E-Mail</Label>
-            <Input id="t-email" type="email" value={email} onChange={e => setEmail(e.target.value)} />
+            <Label htmlFor="t_email">E-Mail</Label>
+            <Input id="t_email" type="email" value={form.email} onChange={e => setForm(p => ({ ...p, email: e.target.value }))} />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="t-telefon">Telefon</Label>
-            <Input id="t-telefon" type="tel" value={telefon} onChange={e => setTelefon(e.target.value)} />
+            <Label htmlFor="t_tel">Telefon</Label>
+            <Input id="t_tel" type="tel" value={form.telefon} onChange={e => setForm(p => ({ ...p, telefon: e.target.value }))} />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="t-geburtsdatum">Geburtsdatum</Label>
-            <Input id="t-geburtsdatum" type="date" value={geburtsdatum} onChange={e => setGeburtsdatum(e.target.value)} />
+            <Label htmlFor="t_geb">Geburtsdatum</Label>
+            <Input id="t_geb" type="date" value={form.geburtsdatum} onChange={e => setForm(p => ({ ...p, geburtsdatum: e.target.value }))} />
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Abbrechen</Button>
-            <Button type="submit" disabled={submitting}>{submitting ? 'Speichert...' : isEditing ? 'Speichern' : 'Erstellen'}</Button>
+            <Button type="submit" disabled={submitting}>{submitting ? 'Speichert...' : (isEdit ? 'Speichern' : 'Erstellen')}</Button>
           </DialogFooter>
         </form>
       </DialogContent>
@@ -542,68 +493,52 @@ function TeilnehmerDialog({
   );
 }
 
-// ─── Anmeldungen CRUD Dialog ───────────────────────────────
+// ─── Anmeldungen CRUD Dialog ─────────────────────────────────────────
 
-function AnmeldungenDialog({
-  open,
-  onOpenChange,
-  record,
-  onSuccess,
-  teilnehmer,
-  kurse,
-}: {
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
-  record: Anmeldungen | null;
-  onSuccess: () => void;
-  teilnehmer: Teilnehmer[];
-  kurse: Kurse[];
+function AnmeldungenDialog({ open, onOpenChange, record, onSuccess, teilnehmer, kurse }: {
+  open: boolean; onOpenChange: (o: boolean) => void; record?: Anmeldungen | null; onSuccess: () => void;
+  teilnehmer: Teilnehmer[]; kurse: Kurse[];
 }) {
-  const isEditing = !!record;
+  const isEdit = !!record;
   const [submitting, setSubmitting] = useState(false);
-  const [teilnehmerId, setTeilnehmerId] = useState('');
-  const [kursId, setKursId] = useState('');
-  const [anmeldedatum, setAnmeldedatum] = useState('');
-  const [bezahlt, setBezahlt] = useState(false);
+  const [form, setForm] = useState({ teilnehmer: 'none', kurs: 'none', anmeldedatum: '', bezahlt: false });
 
   useEffect(() => {
     if (open) {
-      setTeilnehmerId(extractRecordId(record?.fields.teilnehmer) ?? '');
-      setKursId(extractRecordId(record?.fields.kurs) ?? '');
-      setAnmeldedatum(record?.fields.anmeldedatum?.split('T')[0] ?? todayStr());
-      setBezahlt(record?.fields.bezahlt ?? false);
+      setForm({
+        teilnehmer: extractRecordId(record?.fields.teilnehmer) ?? 'none',
+        kurs: extractRecordId(record?.fields.kurs) ?? 'none',
+        anmeldedatum: record?.fields.anmeldedatum?.split('T')[0] ?? todayStr(),
+        bezahlt: record?.fields.bezahlt ?? false,
+      });
     }
   }, [open, record]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!teilnehmerId || teilnehmerId === 'none') {
-      toast.error('Bitte Teilnehmer auswählen.');
-      return;
-    }
-    if (!kursId || kursId === 'none') {
-      toast.error('Bitte Kurs auswählen.');
+    if (form.teilnehmer === 'none' || form.kurs === 'none') {
+      toast.error('Bitte Teilnehmer und Kurs auswählen.');
       return;
     }
     setSubmitting(true);
+    const fields: Anmeldungen['fields'] = {
+      teilnehmer: createRecordUrl(APP_IDS.TEILNEHMER, form.teilnehmer),
+      kurs: createRecordUrl(APP_IDS.KURSE, form.kurs),
+      anmeldedatum: form.anmeldedatum || undefined,
+      bezahlt: form.bezahlt,
+    };
     try {
-      const fields: Anmeldungen['fields'] = {
-        teilnehmer: createRecordUrl(APP_IDS.TEILNEHMER, teilnehmerId),
-        kurs: createRecordUrl(APP_IDS.KURSE, kursId),
-        anmeldedatum: anmeldedatum || undefined,
-        bezahlt,
-      };
-      if (isEditing) {
+      if (isEdit) {
         await LivingAppsService.updateAnmeldungenEntry(record!.record_id, fields);
-        toast.success('Anmeldung wurde aktualisiert.');
+        toast.success('Anmeldung aktualisiert.');
       } else {
         await LivingAppsService.createAnmeldungenEntry(fields);
-        toast.success('Anmeldung wurde erstellt.');
+        toast.success('Anmeldung erstellt.');
       }
       onOpenChange(false);
       onSuccess();
     } catch {
-      toast.error(`Fehler beim ${isEditing ? 'Speichern' : 'Erstellen'}.`);
+      toast.error(`Fehler beim ${isEdit ? 'Speichern' : 'Erstellen'}.`);
     } finally {
       setSubmitting(false);
     }
@@ -613,46 +548,49 @@ function AnmeldungenDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>{isEditing ? 'Anmeldung bearbeiten' : 'Neue Anmeldung'}</DialogTitle>
+          <DialogTitle>{isEdit ? 'Anmeldung bearbeiten' : 'Neue Anmeldung'}</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
-            <Label>Teilnehmer *</Label>
-            <Select value={teilnehmerId || 'none'} onValueChange={v => setTeilnehmerId(v === 'none' ? '' : v)}>
-              <SelectTrigger><SelectValue placeholder="Teilnehmer auswählen..." /></SelectTrigger>
+            <Label>Teilnehmer</Label>
+            <Select value={form.teilnehmer} onValueChange={v => setForm(p => ({ ...p, teilnehmer: v }))}>
+              <SelectTrigger className="w-full"><SelectValue placeholder="Teilnehmer wählen..." /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="none">Bitte auswählen</SelectItem>
+                <SelectItem value="none">– Bitte wählen –</SelectItem>
                 {teilnehmer.map(t => (
                   <SelectItem key={t.record_id} value={t.record_id}>
-                    {[t.fields.teilnehmer_firstname, t.fields.teilnehmer_lastname].filter(Boolean).join(' ') || '–'}
+                    {t.fields.teilnehmer_firstname ?? ''} {t.fields.teilnehmer_lastname ?? ''}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
           <div className="space-y-2">
-            <Label>Kurs *</Label>
-            <Select value={kursId || 'none'} onValueChange={v => setKursId(v === 'none' ? '' : v)}>
-              <SelectTrigger><SelectValue placeholder="Kurs auswählen..." /></SelectTrigger>
+            <Label>Kurs</Label>
+            <Select value={form.kurs} onValueChange={v => setForm(p => ({ ...p, kurs: v }))}>
+              <SelectTrigger className="w-full"><SelectValue placeholder="Kurs wählen..." /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="none">Bitte auswählen</SelectItem>
+                <SelectItem value="none">– Bitte wählen –</SelectItem>
                 {kurse.map(k => (
-                  <SelectItem key={k.record_id} value={k.record_id}>{k.fields.titel ?? '–'}</SelectItem>
+                  <SelectItem key={k.record_id} value={k.record_id}>
+                    {k.fields.titel ?? 'Unbenannt'}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="a-datum">Anmeldedatum</Label>
-            <Input id="a-datum" type="date" value={anmeldedatum} onChange={e => setAnmeldedatum(e.target.value)} />
+            <Label htmlFor="a_datum">Anmeldedatum</Label>
+            <Input id="a_datum" type="date" value={form.anmeldedatum} onChange={e => setForm(p => ({ ...p, anmeldedatum: e.target.value }))} />
           </div>
-          <div className="flex items-center gap-2">
-            <Checkbox id="a-bezahlt" checked={bezahlt} onCheckedChange={v => setBezahlt(v === true)} />
-            <Label htmlFor="a-bezahlt">Bezahlt</Label>
+          <div className="flex items-center space-x-2">
+            <Checkbox id="a_bezahlt" checked={form.bezahlt}
+              onCheckedChange={c => setForm(p => ({ ...p, bezahlt: c === true }))} />
+            <Label htmlFor="a_bezahlt">Bezahlt</Label>
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Abbrechen</Button>
-            <Button type="submit" disabled={submitting}>{submitting ? 'Speichert...' : isEditing ? 'Speichern' : 'Erstellen'}</Button>
+            <Button type="submit" disabled={submitting}>{submitting ? 'Speichert...' : (isEdit ? 'Speichern' : 'Erstellen')}</Button>
           </DialogFooter>
         </form>
       </DialogContent>
@@ -660,12 +598,53 @@ function AnmeldungenDialog({
   );
 }
 
-// ─── Main Dashboard ────────────────────────────────────────
+// ─── Loading State ───────────────────────────────────────────────────
+
+function LoadingState() {
+  return (
+    <div className="min-h-screen bg-background p-6 space-y-6 animate-in fade-in duration-300">
+      <Skeleton className="h-8 w-48" />
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2 space-y-6">
+          <Skeleton className="h-64 w-full rounded-lg" />
+          <Skeleton className="h-48 w-full rounded-lg" />
+        </div>
+        <div className="space-y-4">
+          <Skeleton className="h-20 w-full rounded-lg" />
+          <Skeleton className="h-20 w-full rounded-lg" />
+          <Skeleton className="h-20 w-full rounded-lg" />
+          <Skeleton className="h-20 w-full rounded-lg" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Error State ─────────────────────────────────────────────────────
+
+function ErrorState({ error, onRetry }: { error: Error; onRetry: () => void }) {
+  return (
+    <div className="min-h-screen bg-background flex items-center justify-center p-6">
+      <Card className="max-w-md w-full">
+        <CardContent className="pt-6 text-center space-y-4">
+          <AlertCircle className="h-12 w-12 text-destructive mx-auto" />
+          <h2 className="text-lg font-semibold">Fehler beim Laden</h2>
+          <p className="text-sm text-muted-foreground">{error.message}</p>
+          <Button onClick={onRetry} variant="outline">
+            <RefreshCw className="h-4 w-4 mr-2" /> Erneut versuchen
+          </Button>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// ─── MAIN DASHBOARD ──────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════
 
 export default function Dashboard() {
-  const isMobile = useIsMobile();
-
-  // Data states
+  // ─── State ─────────────────────────────────────────────────────────
   const [raeume, setRaeume] = useState<Raeume[]>([]);
   const [dozenten, setDozenten] = useState<Dozenten[]>([]);
   const [kurse, setKurse] = useState<Kurse[]>([]);
@@ -674,21 +653,21 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
 
-  // Tab state
-  const [activeTab, setActiveTab] = useState('kurse');
-
-  // Dialog states
+  // CRUD dialog state
   const [raeumeDialog, setRaeumeDialog] = useState<{ open: boolean; record: Raeume | null }>({ open: false, record: null });
   const [dozentenDialog, setDozentenDialog] = useState<{ open: boolean; record: Dozenten | null }>({ open: false, record: null });
   const [kurseDialog, setKurseDialog] = useState<{ open: boolean; record: Kurse | null }>({ open: false, record: null });
   const [teilnehmerDialog, setTeilnehmerDialog] = useState<{ open: boolean; record: Teilnehmer | null }>({ open: false, record: null });
   const [anmeldungenDialog, setAnmeldungenDialog] = useState<{ open: boolean; record: Anmeldungen | null }>({ open: false, record: null });
 
-  // Delete states
-  const [deleteTarget, setDeleteTarget] = useState<{ name: string; onConfirm: () => Promise<void> } | null>(null);
+  // Delete dialog state
+  const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; name: string; onConfirm: () => Promise<void> }>({
+    open: false, name: '', onConfirm: async () => {},
+  });
 
-  // Data loading
-  const loadData = useCallback(async () => {
+  // ─── Data Fetching ─────────────────────────────────────────────────
+
+  async function fetchAll() {
     try {
       setLoading(true);
       setError(null);
@@ -699,23 +678,25 @@ export default function Dashboard() {
         LivingAppsService.getTeilnehmer(),
         LivingAppsService.getAnmeldungen(),
       ]);
-      setRaeume(r);
-      setDozenten(d);
-      setKurse(k);
-      setTeilnehmer(t);
-      setAnmeldungen(a);
+      setRaeume(r); setDozenten(d); setKurse(k); setTeilnehmer(t); setAnmeldungen(a);
     } catch (err) {
       setError(err instanceof Error ? err : new Error('Unbekannter Fehler'));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }
 
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
+  useEffect(() => { fetchAll(); }, []);
 
-  // Lookup maps
+  // Refresh helpers
+  const refreshRaeume = async () => { setRaeume(await LivingAppsService.getRaeume()); };
+  const refreshDozenten = async () => { setDozenten(await LivingAppsService.getDozenten()); };
+  const refreshKurse = async () => { setKurse(await LivingAppsService.getKurse()); };
+  const refreshTeilnehmer = async () => { setTeilnehmer(await LivingAppsService.getTeilnehmer()); };
+  const refreshAnmeldungen = async () => { setAnmeldungen(await LivingAppsService.getAnmeldungen()); };
+
+  // ─── Derived Data ──────────────────────────────────────────────────
+
   const dozentMap = useMemo(() => {
     const m = new Map<string, Dozenten>();
     dozenten.forEach(d => m.set(d.record_id, d));
@@ -728,443 +709,276 @@ export default function Dashboard() {
     return m;
   }, [raeume]);
 
-  const teilnehmerMap = useMemo(() => {
-    const m = new Map<string, Teilnehmer>();
-    teilnehmer.forEach(t => m.set(t.record_id, t));
-    return m;
-  }, [teilnehmer]);
-
   const kursMap = useMemo(() => {
     const m = new Map<string, Kurse>();
     kurse.forEach(k => m.set(k.record_id, k));
     return m;
   }, [kurse]);
 
-  // Helper to resolve names
-  function getDozentName(url: string | undefined): string {
-    if (!url) return '–';
-    const id = extractRecordId(url);
-    if (!id) return '–';
-    const d = dozentMap.get(id);
-    if (!d) return '–';
-    return [d.fields.dozent_firstname, d.fields.dozent_lastname].filter(Boolean).join(' ') || '–';
-  }
-
-  function getRaumName(url: string | undefined): string {
-    if (!url) return '–';
-    const id = extractRecordId(url);
-    if (!id) return '–';
-    const r = raumMap.get(id);
-    return r?.fields.raumname ?? '–';
-  }
-
-  function getTeilnehmerName(url: string | undefined): string {
-    if (!url) return '–';
-    const id = extractRecordId(url);
-    if (!id) return '–';
-    const t = teilnehmerMap.get(id);
-    if (!t) return '–';
-    return [t.fields.teilnehmer_firstname, t.fields.teilnehmer_lastname].filter(Boolean).join(' ') || '–';
-  }
-
-  function getKursTitel(url: string | undefined): string {
-    if (!url) return '–';
-    const id = extractRecordId(url);
-    if (!id) return '–';
-    const k = kursMap.get(id);
-    return k?.fields.titel ?? '–';
-  }
-
-  // KPI calculations
-  const today = todayStr();
-
-  const activeKurse = useMemo(() => {
-    return kurse.filter(k => {
-      const start = k.fields.startdatum?.split('T')[0];
-      const end = k.fields.enddatum?.split('T')[0];
-      if (!start && !end) return true;
-      if (start && end) return start <= today && end >= today;
-      if (start) return start <= today;
-      if (end) return end >= today;
-      return true;
-    });
-  }, [kurse, today]);
-
-  const totalCapacity = useMemo(() => {
-    return kurse.reduce((sum, k) => sum + (k.fields.max_teilnehmer ?? 0), 0);
-  }, [kurse]);
-
-  const totalRegistrations = anmeldungen.length;
-
-  const fillRate = totalCapacity > 0 ? Math.round((totalRegistrations / totalCapacity) * 100) : 0;
-
-  const offeneZahlungen = useMemo(() => {
-    return anmeldungen.filter(a => !a.fields.bezahlt).length;
-  }, [anmeldungen]);
-
-  // Chart data: registrations per course
-  const chartData = useMemo(() => {
-    const regCountPerKurs = new Map<string, number>();
-    anmeldungen.forEach(a => {
-      const kursId = extractRecordId(a.fields.kurs);
-      if (!kursId) return;
-      regCountPerKurs.set(kursId, (regCountPerKurs.get(kursId) ?? 0) + 1);
-    });
-
-    return kurse
-      .map(k => ({
-        name: k.fields.titel ?? 'Unbekannt',
-        registrations: regCountPerKurs.get(k.record_id) ?? 0,
-        capacity: k.fields.max_teilnehmer ?? 0,
-        remaining: Math.max(0, (k.fields.max_teilnehmer ?? 0) - (regCountPerKurs.get(k.record_id) ?? 0)),
-      }))
-      .sort((a, b) => {
-        const rateA = a.capacity > 0 ? a.registrations / a.capacity : 0;
-        const rateB = b.capacity > 0 ? b.registrations / b.capacity : 0;
-        return rateB - rateA;
-      });
-  }, [kurse, anmeldungen]);
-
-  // Sorted lists
-  const sortedKurse = useMemo(() => {
-    return [...kurse].sort((a, b) => {
-      const da = a.fields.startdatum ?? '';
-      const db = b.fields.startdatum ?? '';
-      return db.localeCompare(da);
-    });
-  }, [kurse]);
-
-  const sortedAnmeldungen = useMemo(() => {
-    return [...anmeldungen].sort((a, b) => {
-      const da = a.fields.anmeldedatum ?? '';
-      const db = b.fields.anmeldedatum ?? '';
-      return db.localeCompare(da);
-    });
-  }, [anmeldungen]);
-
-  const sortedTeilnehmer = useMemo(() => {
-    return [...teilnehmer].sort((a, b) => {
-      const na = a.fields.teilnehmer_lastname ?? '';
-      const nb = b.fields.teilnehmer_lastname ?? '';
-      return na.localeCompare(nb);
-    });
+  const teilnehmerMap = useMemo(() => {
+    const m = new Map<string, Teilnehmer>();
+    teilnehmer.forEach(t => m.set(t.record_id, t));
+    return m;
   }, [teilnehmer]);
 
-  const sortedDozenten = useMemo(() => {
-    return [...dozenten].sort((a, b) => {
-      const na = a.fields.dozent_lastname ?? '';
-      const nb = b.fields.dozent_lastname ?? '';
-      return na.localeCompare(nb);
+  // Registrations per course
+  const regPerKurs = useMemo(() => {
+    const counts = new Map<string, number>();
+    anmeldungen.forEach(a => {
+      const kId = extractRecordId(a.fields.kurs);
+      if (!kId) return;
+      counts.set(kId, (counts.get(kId) ?? 0) + 1);
     });
-  }, [dozenten]);
+    return counts;
+  }, [anmeldungen]);
 
-  const sortedRaeume = useMemo(() => {
-    return [...raeume].sort((a, b) => {
-      const na = a.fields.raumname ?? '';
-      const nb = b.fields.raumname ?? '';
-      return na.localeCompare(nb);
+  // Stats
+  const totalAnmeldungen = anmeldungen.length;
+  const bezahlt = anmeldungen.filter(a => a.fields.bezahlt === true).length;
+  const offen = totalAnmeldungen - bezahlt;
+
+  // Average utilization
+  const utilization = useMemo(() => {
+    let totalReg = 0;
+    let totalMax = 0;
+    kurse.forEach(k => {
+      const max = k.fields.max_teilnehmer;
+      if (max && max > 0) {
+        const count = regPerKurs.get(k.record_id) ?? 0;
+        totalReg += count;
+        totalMax += max;
+      }
     });
-  }, [raeume]);
+    return totalMax > 0 ? Math.round((totalReg / totalMax) * 100) : 0;
+  }, [kurse, regPerKurs]);
 
-  // Delete handlers
-  function handleDeleteRaeume(r: Raeume) {
-    setDeleteTarget({
-      name: r.fields.raumname ?? 'Raum',
-      onConfirm: async () => {
-        await LivingAppsService.deleteRaeumeEntry(r.record_id);
-        await loadData();
-      },
+  // Revenue
+  const gesamtUmsatz = useMemo(() => {
+    let total = 0;
+    anmeldungen.forEach(a => {
+      if (a.fields.bezahlt !== true) return;
+      const kId = extractRecordId(a.fields.kurs);
+      if (!kId) return;
+      const kurs = kursMap.get(kId);
+      total += kurs?.fields.preis ?? 0;
+    });
+    return total;
+  }, [anmeldungen, kursMap]);
+
+  // Chart data: registrations per course (top 10)
+  const chartData = useMemo(() => {
+    return kurse
+      .map(k => ({
+        name: k.fields.titel ?? 'Unbenannt',
+        count: regPerKurs.get(k.record_id) ?? 0,
+      }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
+  }, [kurse, regPerKurs]);
+
+  // Recent registrations (top 5)
+  const recentAnmeldungen = useMemo(() => {
+    return [...anmeldungen]
+      .sort((a, b) => (b.fields.anmeldedatum ?? b.createdat).localeCompare(a.fields.anmeldedatum ?? a.createdat))
+      .slice(0, 5);
+  }, [anmeldungen]);
+
+  // ─── Delete handlers ───────────────────────────────────────────────
+
+  function confirmDeleteRaum(r: Raeume) {
+    setDeleteDialog({
+      open: true,
+      name: `Raum "${r.fields.raumname ?? 'Unbenannt'}"`,
+      onConfirm: async () => { await LivingAppsService.deleteRaeumeEntry(r.record_id); await refreshRaeume(); },
     });
   }
-  function handleDeleteDozenten(d: Dozenten) {
-    setDeleteTarget({
-      name: [d.fields.dozent_firstname, d.fields.dozent_lastname].filter(Boolean).join(' ') || 'Dozent',
-      onConfirm: async () => {
-        await LivingAppsService.deleteDozentenEntry(d.record_id);
-        await loadData();
-      },
+  function confirmDeleteDozent(d: Dozenten) {
+    setDeleteDialog({
+      open: true,
+      name: `Dozent "${d.fields.dozent_firstname ?? ''} ${d.fields.dozent_lastname ?? ''}"`,
+      onConfirm: async () => { await LivingAppsService.deleteDozentenEntry(d.record_id); await refreshDozenten(); },
     });
   }
-  function handleDeleteKurse(k: Kurse) {
-    setDeleteTarget({
-      name: k.fields.titel ?? 'Kurs',
-      onConfirm: async () => {
-        await LivingAppsService.deleteKurseEntry(k.record_id);
-        await loadData();
-      },
+  function confirmDeleteKurs(k: Kurse) {
+    setDeleteDialog({
+      open: true,
+      name: `Kurs "${k.fields.titel ?? 'Unbenannt'}"`,
+      onConfirm: async () => { await LivingAppsService.deleteKurseEntry(k.record_id); await refreshKurse(); },
     });
   }
-  function handleDeleteTeilnehmer(t: Teilnehmer) {
-    setDeleteTarget({
-      name: [t.fields.teilnehmer_firstname, t.fields.teilnehmer_lastname].filter(Boolean).join(' ') || 'Teilnehmer',
-      onConfirm: async () => {
-        await LivingAppsService.deleteTeilnehmerEntry(t.record_id);
-        await loadData();
-      },
+  function confirmDeleteTeilnehmer(t: Teilnehmer) {
+    setDeleteDialog({
+      open: true,
+      name: `Teilnehmer "${t.fields.teilnehmer_firstname ?? ''} ${t.fields.teilnehmer_lastname ?? ''}"`,
+      onConfirm: async () => { await LivingAppsService.deleteTeilnehmerEntry(t.record_id); await refreshTeilnehmer(); },
     });
   }
-  function handleDeleteAnmeldungen(a: Anmeldungen) {
-    setDeleteTarget({
-      name: 'diese Anmeldung',
-      onConfirm: async () => {
-        await LivingAppsService.deleteAnmeldungenEntry(a.record_id);
-        await loadData();
-      },
+  function confirmDeleteAnmeldung(a: Anmeldungen) {
+    const tId = extractRecordId(a.fields.teilnehmer);
+    const kId = extractRecordId(a.fields.kurs);
+    const tName = tId ? `${teilnehmerMap.get(tId)?.fields.teilnehmer_firstname ?? ''} ${teilnehmerMap.get(tId)?.fields.teilnehmer_lastname ?? ''}`.trim() : 'Unbekannt';
+    const kName = kId ? kursMap.get(kId)?.fields.titel ?? 'Unbekannt' : 'Unbekannt';
+    setDeleteDialog({
+      open: true,
+      name: `Anmeldung von "${tName}" für "${kName}"`,
+      onConfirm: async () => { await LivingAppsService.deleteAnmeldungenEntry(a.record_id); await refreshAnmeldungen(); },
     });
   }
 
-  // ─── Loading State ─────────────────────────────────────
+  // ─── Render ────────────────────────────────────────────────────────
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-background">
-        <Toaster position="top-right" richColors />
-        <div className="mx-auto max-w-[1200px] px-4 py-6 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between mb-8">
-            <Skeleton className="h-8 w-48" />
-            <Skeleton className="h-10 w-40" />
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-8">
-            <Skeleton className="h-48 md:col-span-3" />
-            <div className="md:col-span-2 space-y-4">
-              <Skeleton className="h-24" />
-              <Skeleton className="h-24" />
-              <Skeleton className="h-24" />
-            </div>
-          </div>
-          <Skeleton className="h-[300px] mb-8" />
-          <Skeleton className="h-[400px]" />
-        </div>
-      </div>
-    );
-  }
-
-  // ─── Error State ───────────────────────────────────────
-
-  if (error) {
-    return (
-      <div className="min-h-screen bg-background">
-        <Toaster position="top-right" richColors />
-        <div className="mx-auto max-w-[1200px] px-4 py-6 sm:px-6 lg:px-8">
-          <Alert variant="destructive">
-            <AlertCircle className="h-4 w-4" />
-            <AlertTitle>Fehler beim Laden</AlertTitle>
-            <AlertDescription className="flex items-center gap-4">
-              <span>{error.message}</span>
-              <Button variant="outline" size="sm" onClick={loadData}>
-                <RefreshCw className="h-4 w-4 mr-1" /> Erneut versuchen
-              </Button>
-            </AlertDescription>
-          </Alert>
-        </div>
-      </div>
-    );
-  }
-
-  // ─── Render ────────────────────────────────────────────
+  if (loading) return <LoadingState />;
+  if (error) return <ErrorState error={error} onRetry={fetchAll} />;
 
   return (
-    <div className="min-h-screen bg-background">
-      <Toaster position="top-right" richColors />
-
-      <div className="mx-auto max-w-[1200px] px-4 py-6 sm:px-6 lg:px-8">
-        {/* ── Header ─────────────────────────────── */}
-        <header className="flex items-center justify-between mb-8">
-          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground">Kursverwaltung</h1>
-          <Button onClick={() => setAnmeldungenDialog({ open: true, record: null })}>
-            <Plus className="h-4 w-4 mr-1" />
-            {isMobile ? 'Anmeldung' : 'Neue Anmeldung'}
+    <div className="min-h-screen bg-background animate-in fade-in duration-300">
+      {/* ─── Header ─────────────────────────────────────────────── */}
+      <header className="sticky top-0 z-30 bg-background/80 backdrop-blur-sm border-b border-border">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Kursverwaltung</h1>
+          <Button onClick={() => setAnmeldungenDialog({ open: true, record: null })} className="hidden sm:flex">
+            <Plus className="h-4 w-4 mr-2" /> Neue Anmeldung
           </Button>
-        </header>
+        </div>
+      </header>
 
-        {/* ── Hero + Secondary KPIs ──────────────── */}
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-8">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+        {/* ─── Hero + Stats Row ──────────────────────────────────── */}
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
           {/* Hero KPI */}
-          <Card className="md:col-span-3 shadow-sm hover:shadow-md transition-shadow">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Gesamtauslastung</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="text-5xl sm:text-6xl font-extrabold" style={{ color: 'hsl(215 65% 45%)' }}>
-                {fillRate}%
+          <Card className="lg:col-span-3 shadow-sm hover:shadow-md transition-shadow">
+            <CardContent className="pt-6 flex flex-col items-center text-center space-y-3">
+              <div className="relative">
+                <ProgressRing percent={utilization} size={160} stroke={6} />
+                <div className="absolute inset-0 flex flex-col items-center justify-center">
+                  <span className="text-4xl sm:text-5xl font-extrabold tracking-tight">{totalAnmeldungen}</span>
+                  <span className="text-sm font-medium text-muted-foreground">Anmeldungen</span>
+                </div>
               </div>
-              <div className="w-full h-2 rounded-full bg-muted overflow-hidden">
-                <div
-                  className="h-full rounded-full transition-all duration-500"
-                  style={{ width: `${Math.min(fillRate, 100)}%`, backgroundColor: 'hsl(215 65% 45%)' }}
-                />
+              <p className="text-xs text-muted-foreground">{utilization}% Kursauslastung</p>
+              <div className="flex gap-3">
+                <Badge className="bg-[hsl(152_50%_38%)] text-white border-0">{bezahlt} bezahlt</Badge>
+                <Badge className="bg-[hsl(40_70%_55%)] text-white border-0">{offen} offen</Badge>
               </div>
-              <p className="text-sm text-muted-foreground">
-                {totalRegistrations} von {totalCapacity} Plätzen belegt
-              </p>
             </CardContent>
           </Card>
 
-          {/* Secondary KPIs */}
-          <div className={`md:col-span-2 ${isMobile ? 'flex gap-3 overflow-x-auto pb-1 -mx-4 px-4' : 'flex flex-col gap-4'}`}>
-            <Card className={`shadow-sm hover:shadow-md transition-shadow ${isMobile ? 'min-w-[140px] flex-shrink-0' : ''}`}>
-              <CardContent className="pt-5 pb-4 px-5">
-                <BookOpen className="h-4 w-4 text-muted-foreground mb-2" />
-                <div className="text-2xl sm:text-3xl font-bold text-foreground">{activeKurse.length}</div>
-                <p className="text-xs text-muted-foreground mt-1">Aktive Kurse</p>
-              </CardContent>
-            </Card>
-
-            <Card
-              className={`shadow-sm hover:shadow-md transition-shadow cursor-pointer ${isMobile ? 'min-w-[160px] flex-shrink-0' : ''}`}
-              onClick={() => setActiveTab('anmeldungen')}
-            >
-              <CardContent className="pt-5 pb-4 px-5">
-                <AlertCircle className="h-4 w-4 mb-2" style={{ color: 'hsl(0 72% 51%)' }} />
-                <div className="text-2xl sm:text-3xl font-bold" style={{ color: 'hsl(0 72% 51%)' }}>
-                  {offeneZahlungen}
-                </div>
-                <p className="text-xs text-muted-foreground mt-1">Offene Zahlungen</p>
-              </CardContent>
-            </Card>
-
-            <Card className={`shadow-sm hover:shadow-md transition-shadow ${isMobile ? 'min-w-[140px] flex-shrink-0' : ''}`}>
-              <CardContent className="pt-5 pb-4 px-5">
-                <Users className="h-4 w-4 text-muted-foreground mb-2" />
-                <div className="text-2xl sm:text-3xl font-bold text-foreground">{teilnehmer.length}</div>
-                <p className="text-xs text-muted-foreground mt-1">Teilnehmer</p>
-              </CardContent>
-            </Card>
+          {/* Secondary Stats */}
+          <div className="lg:col-span-2 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-1 gap-3">
+            {[
+              { label: 'Aktive Kurse', value: kurse.length, icon: BookOpen },
+              { label: 'Dozenten', value: dozenten.length, icon: GraduationCap },
+              { label: 'Räume', value: raeume.length, icon: DoorOpen },
+              { label: 'Teilnehmer', value: teilnehmer.length, icon: Users },
+              { label: 'Gesamtumsatz', value: formatCurrency(gesamtUmsatz), icon: Euro },
+            ].map(s => (
+              <Card key={s.label} className="shadow-sm hover:shadow-md transition-shadow">
+                <CardContent className="py-3 px-4 flex items-center justify-between">
+                  <div>
+                    <p className="text-xs text-muted-foreground font-medium">{s.label}</p>
+                    <p className="text-lg font-bold tracking-tight">{s.value}</p>
+                  </div>
+                  <s.icon className="h-5 w-5 text-muted-foreground" />
+                </CardContent>
+              </Card>
+            ))}
           </div>
         </div>
 
-        {/* ── Chart: Kursauslastung ──────────────── */}
-        <Card className="shadow-sm mb-8">
-          <CardHeader>
-            <CardTitle className="text-base font-semibold">Kursauslastung</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {chartData.length === 0 ? (
-              <p className="text-sm text-muted-foreground py-8 text-center">Noch keine Kurse vorhanden.</p>
-            ) : isMobile ? (
-              /* Mobile: vertical progress bars */
-              <div className="space-y-4">
-                {chartData.slice(0, 5).map((item, i) => (
-                  <div key={i}>
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-sm font-medium truncate mr-2">{item.name}</span>
-                      <span className="text-sm text-muted-foreground whitespace-nowrap">
-                        {item.registrations}/{item.capacity}
+        {/* ─── Chart + Recent Registrations ──────────────────────── */}
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+          {/* Chart */}
+          <Card className="lg:col-span-3 shadow-sm">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base font-semibold">Anmeldungen pro Kurs</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {chartData.length === 0 ? (
+                <p className="text-sm text-muted-foreground py-8 text-center">Noch keine Kurse vorhanden.</p>
+              ) : (
+                <div className="h-[300px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={chartData} layout="vertical" margin={{ left: 0, right: 16, top: 8, bottom: 8 }}>
+                      <XAxis type="number" tick={{ fontSize: 12 }} stroke="hsl(210 10% 50%)" allowDecimals={false} />
+                      <YAxis type="category" dataKey="name" tick={{ fontSize: 12 }} stroke="hsl(210 10% 50%)" width={120} />
+                      <Tooltip
+                        contentStyle={{ backgroundColor: 'hsl(0 0% 100%)', border: '1px solid hsl(40 15% 90%)', borderRadius: '8px' }}
+                        formatter={(value: number) => [`${value} Anmeldungen`, '']}
+                      />
+                      <Bar dataKey="count" radius={[0, 4, 4, 0]} maxBarSize={28}>
+                        {chartData.map((_, i) => (
+                          <Cell key={i} fill={`hsl(178 45% ${30 + i * 4}%)`} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Recent Registrations */}
+          <Card className="lg:col-span-2 shadow-sm">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base font-semibold">Letzte Anmeldungen</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {recentAnmeldungen.length === 0 ? (
+                <p className="text-sm text-muted-foreground py-4 text-center">Noch keine Anmeldungen.</p>
+              ) : (
+                recentAnmeldungen.map(a => {
+                  const tId = extractRecordId(a.fields.teilnehmer);
+                  const kId = extractRecordId(a.fields.kurs);
+                  const t = tId ? teilnehmerMap.get(tId) : null;
+                  const k = kId ? kursMap.get(kId) : null;
+                  return (
+                    <div key={a.record_id}
+                      className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted cursor-pointer transition-colors"
+                      onClick={() => setAnmeldungenDialog({ open: true, record: a })}>
+                      <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${a.fields.bezahlt ? 'bg-[hsl(152_50%_38%)]' : 'bg-[hsl(40_70%_55%)]'}`} />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium truncate">
+                          {t ? `${t.fields.teilnehmer_firstname ?? ''} ${t.fields.teilnehmer_lastname ?? ''}`.trim() : 'Unbekannt'}
+                        </p>
+                        <p className="text-xs text-muted-foreground truncate">{k?.fields.titel ?? 'Unbekannt'}</p>
+                      </div>
+                      <span className="text-xs text-muted-foreground whitespace-nowrap">
+                        {relativeDate(a.fields.anmeldedatum ?? a.createdat)}
                       </span>
                     </div>
-                    <div className="w-full h-1 rounded-full bg-muted overflow-hidden">
-                      <div
-                        className="h-full rounded-full"
-                        style={{
-                          width: `${item.capacity > 0 ? Math.min((item.registrations / item.capacity) * 100, 100) : 0}%`,
-                          backgroundColor: 'hsl(215 65% 45%)',
-                        }}
-                      />
-                    </div>
-                  </div>
-                ))}
-                {chartData.length > 5 && (
-                  <button
-                    className="text-sm text-primary hover:underline"
-                    onClick={() => setActiveTab('kurse')}
-                  >
-                    Alle anzeigen
-                  </button>
-                )}
-              </div>
-            ) : (
-              /* Desktop: horizontal bar chart */
-              <div style={{ height: Math.max(200, chartData.length * 40 + 40) }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={chartData} layout="vertical" margin={{ left: 10, right: 30, top: 5, bottom: 5 }}>
-                    <XAxis type="number" tick={{ fontSize: 12 }} stroke="hsl(220 10% 46%)" />
-                    <YAxis
-                      type="category"
-                      dataKey="name"
-                      width={150}
-                      tick={{ fontSize: 12 }}
-                      stroke="hsl(220 10% 46%)"
-                    />
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: 'hsl(0 0% 100%)',
-                        border: '1px solid hsl(220 13% 90%)',
-                        borderRadius: '8px',
-                        fontSize: 13,
-                      }}
-                      formatter={(value: number, name: string) => [
-                        value,
-                        name === 'registrations' ? 'Anmeldungen' : 'Freie Plätze',
-                      ]}
-                    />
-                    <Bar dataKey="registrations" stackId="a" radius={[0, 0, 0, 0]} name="registrations">
-                      {chartData.map((_, idx) => (
-                        <Cell key={idx} fill="hsl(215 65% 45%)" />
-                      ))}
-                    </Bar>
-                    <Bar dataKey="remaining" stackId="a" radius={[0, 4, 4, 0]} name="remaining">
-                      {chartData.map((_, idx) => (
-                        <Cell key={idx} fill="hsl(220 14% 95%)" />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+                  );
+                })
+              )}
+            </CardContent>
+          </Card>
+        </div>
 
-        {/* ── Data Management Tabs ───────────────── */}
-        <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="w-full justify-start overflow-x-auto">
+        {/* ─── Data Management Tabs ──────────────────────────────── */}
+        <Tabs defaultValue="kurse" className="space-y-4">
+          <TabsList className="w-full flex overflow-x-auto">
             <TabsTrigger value="kurse">Kurse</TabsTrigger>
-            <TabsTrigger value="anmeldungen">Anmeldungen</TabsTrigger>
-            <TabsTrigger value="teilnehmer">Teilnehmer</TabsTrigger>
             <TabsTrigger value="dozenten">Dozenten</TabsTrigger>
             <TabsTrigger value="raeume">Räume</TabsTrigger>
+            <TabsTrigger value="teilnehmer">Teilnehmer</TabsTrigger>
+            <TabsTrigger value="anmeldungen">Anmeldungen</TabsTrigger>
           </TabsList>
 
-          {/* ── Kurse Tab ──────────────────────────── */}
+          {/* ── Kurse Tab ────────────────────────────────────────── */}
           <TabsContent value="kurse">
             <Card className="shadow-sm">
-              <CardHeader className="flex flex-row items-center justify-between">
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
                 <CardTitle className="text-base font-semibold">Kurse</CardTitle>
                 <Button size="sm" onClick={() => setKurseDialog({ open: true, record: null })}>
                   <Plus className="h-4 w-4 mr-1" /> Neu
                 </Button>
               </CardHeader>
               <CardContent>
-                {sortedKurse.length === 0 ? (
-                  <div className="text-center py-8">
-                    <p className="text-muted-foreground mb-4">Noch keine Kurse vorhanden.</p>
+                {kurse.length === 0 ? (
+                  <div className="text-center py-8 space-y-3">
+                    <p className="text-sm text-muted-foreground">Noch keine Kurse vorhanden.</p>
                     <Button variant="outline" onClick={() => setKurseDialog({ open: true, record: null })}>
-                      <Plus className="h-4 w-4 mr-1" /> Ersten Kurs anlegen
+                      <Plus className="h-4 w-4 mr-1" /> Ersten Kurs erstellen
                     </Button>
-                  </div>
-                ) : isMobile ? (
-                  <div className="space-y-3">
-                    {sortedKurse.map(k => (
-                      <div key={k.record_id} className="p-3 rounded-lg border bg-card">
-                        <div className="flex items-start justify-between">
-                          <div className="min-w-0 flex-1">
-                            <div className="font-medium truncate">{k.fields.titel ?? '–'}</div>
-                            <div className="text-sm text-muted-foreground">{getDozentName(k.fields.dozent)}</div>
-                            <div className="text-sm text-muted-foreground">
-                              {formatDate(k.fields.startdatum)} – {formatDate(k.fields.enddatum)}
-                            </div>
-                            <div className="text-sm font-medium mt-1">{formatCurrency(k.fields.preis)}</div>
-                          </div>
-                          <div className="flex gap-1 ml-2">
-                            <Button variant="ghost" size="icon" onClick={() => setKurseDialog({ open: true, record: k })} aria-label="Bearbeiten">
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                            <Button variant="ghost" size="icon" onClick={() => handleDeleteKurse(k)} aria-label="Löschen" className="text-destructive hover:text-destructive">
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
                   </div>
                 ) : (
                   <div className="overflow-x-auto">
@@ -1172,37 +986,54 @@ export default function Dashboard() {
                       <TableHeader>
                         <TableRow>
                           <TableHead>Kurstitel</TableHead>
-                          <TableHead>Dozent</TableHead>
-                          <TableHead>Raum</TableHead>
-                          <TableHead>Start</TableHead>
-                          <TableHead>Ende</TableHead>
-                          <TableHead className="text-right">Preis</TableHead>
-                          <TableHead className="text-right">Max. TN</TableHead>
-                          <TableHead className="w-[100px]">Aktionen</TableHead>
+                          <TableHead className="hidden sm:table-cell">Dozent</TableHead>
+                          <TableHead className="hidden md:table-cell">Zeitraum</TableHead>
+                          <TableHead>Plätze</TableHead>
+                          <TableHead className="hidden sm:table-cell">Preis</TableHead>
+                          <TableHead className="w-[80px]" />
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {sortedKurse.map(k => (
-                          <TableRow key={k.record_id} className="hover:bg-muted/50">
-                            <TableCell className="font-medium">{k.fields.titel ?? '–'}</TableCell>
-                            <TableCell>{getDozentName(k.fields.dozent)}</TableCell>
-                            <TableCell>{getRaumName(k.fields.raum)}</TableCell>
-                            <TableCell>{formatDate(k.fields.startdatum)}</TableCell>
-                            <TableCell>{formatDate(k.fields.enddatum)}</TableCell>
-                            <TableCell className="text-right">{formatCurrency(k.fields.preis)}</TableCell>
-                            <TableCell className="text-right">{k.fields.max_teilnehmer ?? '–'}</TableCell>
-                            <TableCell>
-                              <div className="flex gap-1">
-                                <Button variant="ghost" size="icon" onClick={() => setKurseDialog({ open: true, record: k })} aria-label="Bearbeiten">
-                                  <Pencil className="h-4 w-4" />
-                                </Button>
-                                <Button variant="ghost" size="icon" onClick={() => handleDeleteKurse(k)} aria-label="Löschen" className="text-destructive hover:text-destructive">
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        ))}
+                        {kurse.map(k => {
+                          const dId = extractRecordId(k.fields.dozent);
+                          const doz = dId ? dozentMap.get(dId) : null;
+                          const regs = regPerKurs.get(k.record_id) ?? 0;
+                          const max = k.fields.max_teilnehmer ?? 0;
+                          const fillPct = max > 0 ? Math.min((regs / max) * 100, 100) : 0;
+                          return (
+                            <TableRow key={k.record_id} className="group hover:bg-muted/50 cursor-pointer"
+                              onClick={() => setKurseDialog({ open: true, record: k })}>
+                              <TableCell className="font-medium">{k.fields.titel ?? '–'}</TableCell>
+                              <TableCell className="hidden sm:table-cell text-muted-foreground">
+                                {doz ? `${doz.fields.dozent_firstname ?? ''} ${doz.fields.dozent_lastname ?? ''}`.trim() : '–'}
+                              </TableCell>
+                              <TableCell className="hidden md:table-cell text-muted-foreground text-sm">
+                                {k.fields.startdatum ? formatDate(k.fields.startdatum) : '–'} – {k.fields.enddatum ? formatDate(k.fields.enddatum) : '–'}
+                              </TableCell>
+                              <TableCell>
+                                <div className="flex items-center gap-2">
+                                  <div className="w-16 h-1.5 bg-muted rounded-full overflow-hidden">
+                                    <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${fillPct}%` }} />
+                                  </div>
+                                  <span className="text-xs text-muted-foreground">{regs}/{max || '∞'}</span>
+                                </div>
+                              </TableCell>
+                              <TableCell className="hidden sm:table-cell text-muted-foreground">{formatCurrency(k.fields.preis)}</TableCell>
+                              <TableCell>
+                                <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <Button variant="ghost" size="icon" className="h-8 w-8"
+                                    onClick={e => { e.stopPropagation(); setKurseDialog({ open: true, record: k }); }}>
+                                    <Pencil className="h-3.5 w-3.5" />
+                                  </Button>
+                                  <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive"
+                                    onClick={e => { e.stopPropagation(); confirmDeleteKurs(k); }}>
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
                       </TableBody>
                     </Table>
                   </div>
@@ -1211,218 +1042,22 @@ export default function Dashboard() {
             </Card>
           </TabsContent>
 
-          {/* ── Anmeldungen Tab ────────────────────── */}
-          <TabsContent value="anmeldungen">
-            <Card className="shadow-sm">
-              <CardHeader className="flex flex-row items-center justify-between">
-                <CardTitle className="text-base font-semibold">Anmeldungen</CardTitle>
-                <Button size="sm" onClick={() => setAnmeldungenDialog({ open: true, record: null })}>
-                  <Plus className="h-4 w-4 mr-1" /> Neu
-                </Button>
-              </CardHeader>
-              <CardContent>
-                {sortedAnmeldungen.length === 0 ? (
-                  <div className="text-center py-8">
-                    <p className="text-muted-foreground mb-4">Noch keine Anmeldungen vorhanden.</p>
-                    <Button variant="outline" onClick={() => setAnmeldungenDialog({ open: true, record: null })}>
-                      <Plus className="h-4 w-4 mr-1" /> Erste Anmeldung erstellen
-                    </Button>
-                  </div>
-                ) : isMobile ? (
-                  <div className="space-y-3">
-                    {sortedAnmeldungen.map(a => (
-                      <div key={a.record_id} className="p-3 rounded-lg border bg-card">
-                        <div className="flex items-start justify-between">
-                          <div className="min-w-0 flex-1">
-                            <div className="font-medium truncate">{getTeilnehmerName(a.fields.teilnehmer)}</div>
-                            <div className="text-sm text-muted-foreground">{getKursTitel(a.fields.kurs)}</div>
-                            <div className="mt-1">
-                              {a.fields.bezahlt ? (
-                                <Badge variant="default" className="text-xs" style={{ backgroundColor: 'hsl(152 55% 41%)' }}>Bezahlt</Badge>
-                              ) : (
-                                <Badge variant="destructive" className="text-xs">Offen</Badge>
-                              )}
-                            </div>
-                          </div>
-                          <div className="flex gap-1 ml-2">
-                            <Button variant="ghost" size="icon" onClick={() => setAnmeldungenDialog({ open: true, record: a })} aria-label="Bearbeiten">
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                            <Button variant="ghost" size="icon" onClick={() => handleDeleteAnmeldungen(a)} aria-label="Löschen" className="text-destructive hover:text-destructive">
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Teilnehmer</TableHead>
-                          <TableHead>Kurs</TableHead>
-                          <TableHead>Anmeldedatum</TableHead>
-                          <TableHead>Status</TableHead>
-                          <TableHead className="w-[100px]">Aktionen</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {sortedAnmeldungen.map(a => (
-                          <TableRow key={a.record_id} className="hover:bg-muted/50">
-                            <TableCell className="font-medium">{getTeilnehmerName(a.fields.teilnehmer)}</TableCell>
-                            <TableCell>{getKursTitel(a.fields.kurs)}</TableCell>
-                            <TableCell>{formatDate(a.fields.anmeldedatum)}</TableCell>
-                            <TableCell>
-                              {a.fields.bezahlt ? (
-                                <Badge variant="default" className="text-xs" style={{ backgroundColor: 'hsl(152 55% 41%)' }}>Bezahlt</Badge>
-                              ) : (
-                                <Badge variant="destructive" className="text-xs">Offen</Badge>
-                              )}
-                            </TableCell>
-                            <TableCell>
-                              <div className="flex gap-1">
-                                <Button variant="ghost" size="icon" onClick={() => setAnmeldungenDialog({ open: true, record: a })} aria-label="Bearbeiten">
-                                  <Pencil className="h-4 w-4" />
-                                </Button>
-                                <Button variant="ghost" size="icon" onClick={() => handleDeleteAnmeldungen(a)} aria-label="Löschen" className="text-destructive hover:text-destructive">
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          {/* ── Teilnehmer Tab ─────────────────────── */}
-          <TabsContent value="teilnehmer">
-            <Card className="shadow-sm">
-              <CardHeader className="flex flex-row items-center justify-between">
-                <CardTitle className="text-base font-semibold">Teilnehmer</CardTitle>
-                <Button size="sm" onClick={() => setTeilnehmerDialog({ open: true, record: null })}>
-                  <Plus className="h-4 w-4 mr-1" /> Neu
-                </Button>
-              </CardHeader>
-              <CardContent>
-                {sortedTeilnehmer.length === 0 ? (
-                  <div className="text-center py-8">
-                    <p className="text-muted-foreground mb-4">Noch keine Teilnehmer vorhanden.</p>
-                    <Button variant="outline" onClick={() => setTeilnehmerDialog({ open: true, record: null })}>
-                      <Plus className="h-4 w-4 mr-1" /> Ersten Teilnehmer anlegen
-                    </Button>
-                  </div>
-                ) : isMobile ? (
-                  <div className="space-y-3">
-                    {sortedTeilnehmer.map(t => (
-                      <div key={t.record_id} className="p-3 rounded-lg border bg-card">
-                        <div className="flex items-start justify-between">
-                          <div className="min-w-0 flex-1">
-                            <div className="font-medium truncate">
-                              {[t.fields.teilnehmer_firstname, t.fields.teilnehmer_lastname].filter(Boolean).join(' ') || '–'}
-                            </div>
-                            <div className="text-sm text-muted-foreground">{t.fields.email ?? '–'}</div>
-                            <div className="text-sm text-muted-foreground">{t.fields.telefon ?? ''}</div>
-                          </div>
-                          <div className="flex gap-1 ml-2">
-                            <Button variant="ghost" size="icon" onClick={() => setTeilnehmerDialog({ open: true, record: t })} aria-label="Bearbeiten">
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                            <Button variant="ghost" size="icon" onClick={() => handleDeleteTeilnehmer(t)} aria-label="Löschen" className="text-destructive hover:text-destructive">
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Vorname</TableHead>
-                          <TableHead>Nachname</TableHead>
-                          <TableHead>E-Mail</TableHead>
-                          <TableHead>Telefon</TableHead>
-                          <TableHead>Geburtsdatum</TableHead>
-                          <TableHead className="w-[100px]">Aktionen</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {sortedTeilnehmer.map(t => (
-                          <TableRow key={t.record_id} className="hover:bg-muted/50">
-                            <TableCell className="font-medium">{t.fields.teilnehmer_firstname ?? '–'}</TableCell>
-                            <TableCell>{t.fields.teilnehmer_lastname ?? '–'}</TableCell>
-                            <TableCell>{t.fields.email ?? '–'}</TableCell>
-                            <TableCell>{t.fields.telefon ?? '–'}</TableCell>
-                            <TableCell>{formatDate(t.fields.geburtsdatum)}</TableCell>
-                            <TableCell>
-                              <div className="flex gap-1">
-                                <Button variant="ghost" size="icon" onClick={() => setTeilnehmerDialog({ open: true, record: t })} aria-label="Bearbeiten">
-                                  <Pencil className="h-4 w-4" />
-                                </Button>
-                                <Button variant="ghost" size="icon" onClick={() => handleDeleteTeilnehmer(t)} aria-label="Löschen" className="text-destructive hover:text-destructive">
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          {/* ── Dozenten Tab ───────────────────────── */}
+          {/* ── Dozenten Tab ─────────────────────────────────────── */}
           <TabsContent value="dozenten">
             <Card className="shadow-sm">
-              <CardHeader className="flex flex-row items-center justify-between">
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
                 <CardTitle className="text-base font-semibold">Dozenten</CardTitle>
                 <Button size="sm" onClick={() => setDozentenDialog({ open: true, record: null })}>
                   <Plus className="h-4 w-4 mr-1" /> Neu
                 </Button>
               </CardHeader>
               <CardContent>
-                {sortedDozenten.length === 0 ? (
-                  <div className="text-center py-8">
-                    <p className="text-muted-foreground mb-4">Noch keine Dozenten vorhanden.</p>
+                {dozenten.length === 0 ? (
+                  <div className="text-center py-8 space-y-3">
+                    <p className="text-sm text-muted-foreground">Noch keine Dozenten vorhanden.</p>
                     <Button variant="outline" onClick={() => setDozentenDialog({ open: true, record: null })}>
-                      <Plus className="h-4 w-4 mr-1" /> Ersten Dozenten anlegen
+                      <Plus className="h-4 w-4 mr-1" /> Ersten Dozenten hinzufügen
                     </Button>
-                  </div>
-                ) : isMobile ? (
-                  <div className="space-y-3">
-                    {sortedDozenten.map(d => (
-                      <div key={d.record_id} className="p-3 rounded-lg border bg-card">
-                        <div className="flex items-start justify-between">
-                          <div className="min-w-0 flex-1">
-                            <div className="font-medium truncate">
-                              {[d.fields.dozent_firstname, d.fields.dozent_lastname].filter(Boolean).join(' ') || '–'}
-                            </div>
-                            <div className="text-sm text-muted-foreground">{d.fields.fachgebiet ?? ''}</div>
-                            <div className="text-sm text-muted-foreground">{d.fields.email ?? '–'}</div>
-                          </div>
-                          <div className="flex gap-1 ml-2">
-                            <Button variant="ghost" size="icon" onClick={() => setDozentenDialog({ open: true, record: d })} aria-label="Bearbeiten">
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                            <Button variant="ghost" size="icon" onClick={() => handleDeleteDozenten(d)} aria-label="Löschen" className="text-destructive hover:text-destructive">
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
                   </div>
                 ) : (
                   <div className="overflow-x-auto">
@@ -1431,27 +1066,28 @@ export default function Dashboard() {
                         <TableRow>
                           <TableHead>Vorname</TableHead>
                           <TableHead>Nachname</TableHead>
-                          <TableHead>E-Mail</TableHead>
-                          <TableHead>Telefon</TableHead>
-                          <TableHead>Fachgebiet</TableHead>
-                          <TableHead className="w-[100px]">Aktionen</TableHead>
+                          <TableHead className="hidden sm:table-cell">E-Mail</TableHead>
+                          <TableHead className="hidden md:table-cell">Fachgebiet</TableHead>
+                          <TableHead className="w-[80px]" />
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {sortedDozenten.map(d => (
-                          <TableRow key={d.record_id} className="hover:bg-muted/50">
+                        {dozenten.map(d => (
+                          <TableRow key={d.record_id} className="group hover:bg-muted/50 cursor-pointer"
+                            onClick={() => setDozentenDialog({ open: true, record: d })}>
                             <TableCell className="font-medium">{d.fields.dozent_firstname ?? '–'}</TableCell>
                             <TableCell>{d.fields.dozent_lastname ?? '–'}</TableCell>
-                            <TableCell>{d.fields.email ?? '–'}</TableCell>
-                            <TableCell>{d.fields.telefon ?? '–'}</TableCell>
-                            <TableCell>{d.fields.fachgebiet ?? '–'}</TableCell>
+                            <TableCell className="hidden sm:table-cell text-muted-foreground">{d.fields.email ?? '–'}</TableCell>
+                            <TableCell className="hidden md:table-cell text-muted-foreground">{d.fields.fachgebiet ?? '–'}</TableCell>
                             <TableCell>
-                              <div className="flex gap-1">
-                                <Button variant="ghost" size="icon" onClick={() => setDozentenDialog({ open: true, record: d })} aria-label="Bearbeiten">
-                                  <Pencil className="h-4 w-4" />
+                              <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <Button variant="ghost" size="icon" className="h-8 w-8"
+                                  onClick={e => { e.stopPropagation(); setDozentenDialog({ open: true, record: d }); }}>
+                                  <Pencil className="h-3.5 w-3.5" />
                                 </Button>
-                                <Button variant="ghost" size="icon" onClick={() => handleDeleteDozenten(d)} aria-label="Löschen" className="text-destructive hover:text-destructive">
-                                  <Trash2 className="h-4 w-4" />
+                                <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive"
+                                  onClick={e => { e.stopPropagation(); confirmDeleteDozent(d); }}>
+                                  <Trash2 className="h-3.5 w-3.5" />
                                 </Button>
                               </div>
                             </TableCell>
@@ -1465,46 +1101,22 @@ export default function Dashboard() {
             </Card>
           </TabsContent>
 
-          {/* ── Räume Tab ──────────────────────────── */}
+          {/* ── Räume Tab ────────────────────────────────────────── */}
           <TabsContent value="raeume">
             <Card className="shadow-sm">
-              <CardHeader className="flex flex-row items-center justify-between">
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
                 <CardTitle className="text-base font-semibold">Räume</CardTitle>
                 <Button size="sm" onClick={() => setRaeumeDialog({ open: true, record: null })}>
                   <Plus className="h-4 w-4 mr-1" /> Neu
                 </Button>
               </CardHeader>
               <CardContent>
-                {sortedRaeume.length === 0 ? (
-                  <div className="text-center py-8">
-                    <p className="text-muted-foreground mb-4">Noch keine Räume vorhanden.</p>
+                {raeume.length === 0 ? (
+                  <div className="text-center py-8 space-y-3">
+                    <p className="text-sm text-muted-foreground">Noch keine Räume vorhanden.</p>
                     <Button variant="outline" onClick={() => setRaeumeDialog({ open: true, record: null })}>
-                      <Plus className="h-4 w-4 mr-1" /> Ersten Raum anlegen
+                      <Plus className="h-4 w-4 mr-1" /> Ersten Raum hinzufügen
                     </Button>
-                  </div>
-                ) : isMobile ? (
-                  <div className="space-y-3">
-                    {sortedRaeume.map(r => (
-                      <div key={r.record_id} className="p-3 rounded-lg border bg-card">
-                        <div className="flex items-start justify-between">
-                          <div className="min-w-0 flex-1">
-                            <div className="font-medium truncate">{r.fields.raumname ?? '–'}</div>
-                            <div className="text-sm text-muted-foreground">{r.fields.gebaeude ?? ''}</div>
-                            <div className="text-sm text-muted-foreground">
-                              {r.fields.kapazitaet != null ? `Kapazität: ${r.fields.kapazitaet}` : ''}
-                            </div>
-                          </div>
-                          <div className="flex gap-1 ml-2">
-                            <Button variant="ghost" size="icon" onClick={() => setRaeumeDialog({ open: true, record: r })} aria-label="Bearbeiten">
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                            <Button variant="ghost" size="icon" onClick={() => handleDeleteRaeume(r)} aria-label="Löschen" className="text-destructive hover:text-destructive">
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
                   </div>
                 ) : (
                   <div className="overflow-x-auto">
@@ -1513,23 +1125,26 @@ export default function Dashboard() {
                         <TableRow>
                           <TableHead>Raumname</TableHead>
                           <TableHead>Gebäude</TableHead>
-                          <TableHead className="text-right">Kapazität</TableHead>
-                          <TableHead className="w-[100px]">Aktionen</TableHead>
+                          <TableHead>Kapazität</TableHead>
+                          <TableHead className="w-[80px]" />
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {sortedRaeume.map(r => (
-                          <TableRow key={r.record_id} className="hover:bg-muted/50">
+                        {raeume.map(r => (
+                          <TableRow key={r.record_id} className="group hover:bg-muted/50 cursor-pointer"
+                            onClick={() => setRaeumeDialog({ open: true, record: r })}>
                             <TableCell className="font-medium">{r.fields.raumname ?? '–'}</TableCell>
-                            <TableCell>{r.fields.gebaeude ?? '–'}</TableCell>
-                            <TableCell className="text-right">{r.fields.kapazitaet ?? '–'}</TableCell>
+                            <TableCell className="text-muted-foreground">{r.fields.gebaeude ?? '–'}</TableCell>
+                            <TableCell className="text-muted-foreground">{r.fields.kapazitaet ?? '–'}</TableCell>
                             <TableCell>
-                              <div className="flex gap-1">
-                                <Button variant="ghost" size="icon" onClick={() => setRaeumeDialog({ open: true, record: r })} aria-label="Bearbeiten">
-                                  <Pencil className="h-4 w-4" />
+                              <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <Button variant="ghost" size="icon" className="h-8 w-8"
+                                  onClick={e => { e.stopPropagation(); setRaeumeDialog({ open: true, record: r }); }}>
+                                  <Pencil className="h-3.5 w-3.5" />
                                 </Button>
-                                <Button variant="ghost" size="icon" onClick={() => handleDeleteRaeume(r)} aria-label="Löschen" className="text-destructive hover:text-destructive">
-                                  <Trash2 className="h-4 w-4" />
+                                <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive"
+                                  onClick={e => { e.stopPropagation(); confirmDeleteRaum(r); }}>
+                                  <Trash2 className="h-3.5 w-3.5" />
                                 </Button>
                               </div>
                             </TableCell>
@@ -1542,51 +1157,194 @@ export default function Dashboard() {
               </CardContent>
             </Card>
           </TabsContent>
+
+          {/* ── Teilnehmer Tab ───────────────────────────────────── */}
+          <TabsContent value="teilnehmer">
+            <Card className="shadow-sm">
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-base font-semibold">Teilnehmer</CardTitle>
+                <Button size="sm" onClick={() => setTeilnehmerDialog({ open: true, record: null })}>
+                  <Plus className="h-4 w-4 mr-1" /> Neu
+                </Button>
+              </CardHeader>
+              <CardContent>
+                {teilnehmer.length === 0 ? (
+                  <div className="text-center py-8 space-y-3">
+                    <p className="text-sm text-muted-foreground">Noch keine Teilnehmer vorhanden.</p>
+                    <Button variant="outline" onClick={() => setTeilnehmerDialog({ open: true, record: null })}>
+                      <Plus className="h-4 w-4 mr-1" /> Ersten Teilnehmer hinzufügen
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Vorname</TableHead>
+                          <TableHead>Nachname</TableHead>
+                          <TableHead className="hidden sm:table-cell">E-Mail</TableHead>
+                          <TableHead className="hidden md:table-cell">Geburtsdatum</TableHead>
+                          <TableHead className="w-[80px]" />
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {teilnehmer.map(t => (
+                          <TableRow key={t.record_id} className="group hover:bg-muted/50 cursor-pointer"
+                            onClick={() => setTeilnehmerDialog({ open: true, record: t })}>
+                            <TableCell className="font-medium">{t.fields.teilnehmer_firstname ?? '–'}</TableCell>
+                            <TableCell>{t.fields.teilnehmer_lastname ?? '–'}</TableCell>
+                            <TableCell className="hidden sm:table-cell text-muted-foreground">{t.fields.email ?? '–'}</TableCell>
+                            <TableCell className="hidden md:table-cell text-muted-foreground">{formatDate(t.fields.geburtsdatum)}</TableCell>
+                            <TableCell>
+                              <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <Button variant="ghost" size="icon" className="h-8 w-8"
+                                  onClick={e => { e.stopPropagation(); setTeilnehmerDialog({ open: true, record: t }); }}>
+                                  <Pencil className="h-3.5 w-3.5" />
+                                </Button>
+                                <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive"
+                                  onClick={e => { e.stopPropagation(); confirmDeleteTeilnehmer(t); }}>
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* ── Anmeldungen Tab ──────────────────────────────────── */}
+          <TabsContent value="anmeldungen">
+            <Card className="shadow-sm">
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-base font-semibold">Anmeldungen</CardTitle>
+                <Button size="sm" onClick={() => setAnmeldungenDialog({ open: true, record: null })}>
+                  <Plus className="h-4 w-4 mr-1" /> Neu
+                </Button>
+              </CardHeader>
+              <CardContent>
+                {anmeldungen.length === 0 ? (
+                  <div className="text-center py-8 space-y-3">
+                    <p className="text-sm text-muted-foreground">Noch keine Anmeldungen vorhanden.</p>
+                    <Button variant="outline" onClick={() => setAnmeldungenDialog({ open: true, record: null })}>
+                      <Plus className="h-4 w-4 mr-1" /> Erste Anmeldung erstellen
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Teilnehmer</TableHead>
+                          <TableHead>Kurs</TableHead>
+                          <TableHead className="hidden sm:table-cell">Datum</TableHead>
+                          <TableHead>Bezahlt</TableHead>
+                          <TableHead className="w-[80px]" />
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {[...anmeldungen]
+                          .sort((a, b) => (b.fields.anmeldedatum ?? b.createdat).localeCompare(a.fields.anmeldedatum ?? a.createdat))
+                          .map(a => {
+                            const tId = extractRecordId(a.fields.teilnehmer);
+                            const kId = extractRecordId(a.fields.kurs);
+                            const t = tId ? teilnehmerMap.get(tId) : null;
+                            const k = kId ? kursMap.get(kId) : null;
+                            return (
+                              <TableRow key={a.record_id} className="group hover:bg-muted/50 cursor-pointer"
+                                onClick={() => setAnmeldungenDialog({ open: true, record: a })}>
+                                <TableCell className="font-medium">
+                                  {t ? `${t.fields.teilnehmer_firstname ?? ''} ${t.fields.teilnehmer_lastname ?? ''}`.trim() : '–'}
+                                </TableCell>
+                                <TableCell className="text-muted-foreground">{k?.fields.titel ?? '–'}</TableCell>
+                                <TableCell className="hidden sm:table-cell text-muted-foreground">{formatDate(a.fields.anmeldedatum)}</TableCell>
+                                <TableCell>
+                                  {a.fields.bezahlt ? (
+                                    <Badge className="bg-[hsl(152_50%_38%)] text-white border-0 text-xs">Bezahlt</Badge>
+                                  ) : (
+                                    <Badge className="bg-[hsl(40_70%_55%)] text-white border-0 text-xs">Offen</Badge>
+                                  )}
+                                </TableCell>
+                                <TableCell>
+                                  <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <Button variant="ghost" size="icon" className="h-8 w-8"
+                                      onClick={e => { e.stopPropagation(); setAnmeldungenDialog({ open: true, record: a }); }}>
+                                      <Pencil className="h-3.5 w-3.5" />
+                                    </Button>
+                                    <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive"
+                                      onClick={e => { e.stopPropagation(); confirmDeleteAnmeldung(a); }}>
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                    </Button>
+                                  </div>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
         </Tabs>
+      </main>
+
+      {/* ─── Mobile Fixed Bottom Action ──────────────────────────── */}
+      <div className="fixed bottom-0 left-0 right-0 p-4 bg-background/80 backdrop-blur-sm border-t border-border sm:hidden z-30">
+        <Button className="w-full h-[52px] text-base font-semibold"
+          onClick={() => setAnmeldungenDialog({ open: true, record: null })}>
+          <Plus className="h-5 w-5 mr-2" /> Neue Anmeldung
+        </Button>
       </div>
 
-      {/* ── CRUD Dialogs ──────────────────────────── */}
+      {/* ─── Spacer for mobile bottom bar ────────────────────────── */}
+      <div className="h-20 sm:hidden" />
+
+      {/* ─── CRUD Dialogs ────────────────────────────────────────── */}
       <RaeumeDialog
         open={raeumeDialog.open}
-        onOpenChange={open => setRaeumeDialog(prev => ({ ...prev, open }))}
+        onOpenChange={o => setRaeumeDialog(p => ({ ...p, open: o }))}
         record={raeumeDialog.record}
-        onSuccess={loadData}
+        onSuccess={refreshRaeume}
       />
       <DozentenDialog
         open={dozentenDialog.open}
-        onOpenChange={open => setDozentenDialog(prev => ({ ...prev, open }))}
+        onOpenChange={o => setDozentenDialog(p => ({ ...p, open: o }))}
         record={dozentenDialog.record}
-        onSuccess={loadData}
+        onSuccess={refreshDozenten}
       />
       <KurseDialog
         open={kurseDialog.open}
-        onOpenChange={open => setKurseDialog(prev => ({ ...prev, open }))}
+        onOpenChange={o => setKurseDialog(p => ({ ...p, open: o }))}
         record={kurseDialog.record}
-        onSuccess={loadData}
+        onSuccess={refreshKurse}
         raeume={raeume}
         dozenten={dozenten}
       />
       <TeilnehmerDialog
         open={teilnehmerDialog.open}
-        onOpenChange={open => setTeilnehmerDialog(prev => ({ ...prev, open }))}
+        onOpenChange={o => setTeilnehmerDialog(p => ({ ...p, open: o }))}
         record={teilnehmerDialog.record}
-        onSuccess={loadData}
+        onSuccess={refreshTeilnehmer}
       />
       <AnmeldungenDialog
         open={anmeldungenDialog.open}
-        onOpenChange={open => setAnmeldungenDialog(prev => ({ ...prev, open }))}
+        onOpenChange={o => setAnmeldungenDialog(p => ({ ...p, open: o }))}
         record={anmeldungenDialog.record}
-        onSuccess={loadData}
+        onSuccess={refreshAnmeldungen}
         teilnehmer={teilnehmer}
         kurse={kurse}
       />
-
-      {/* ── Delete Confirmation ───────────────────── */}
       <DeleteConfirmDialog
-        open={!!deleteTarget}
-        onOpenChange={open => { if (!open) setDeleteTarget(null); }}
-        recordName={deleteTarget?.name ?? ''}
-        onConfirm={deleteTarget?.onConfirm ?? (async () => {})}
+        open={deleteDialog.open}
+        onOpenChange={o => setDeleteDialog(p => ({ ...p, open: o }))}
+        name={deleteDialog.name}
+        onConfirm={deleteDialog.onConfirm}
       />
     </div>
   );
