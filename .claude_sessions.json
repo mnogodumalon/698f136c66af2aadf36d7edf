@@ -1,0 +1,11 @@
+{
+  "sessions": [
+    {
+      "id": "24aa0e72-6f62-4e34-a1ab-3a24f5128fbe",
+      "name": "2026-02-18 09:08 - Initial build: Kursverwaltung",
+      "created_at": "2026-02-18T09:08:10.743047Z",
+      "last_used": "2026-02-18T09:08:10.743047Z"
+    }
+  ],
+  "active_session": "24aa0e72-6f62-4e34-a1ab-3a24f5128fbe"
+}
