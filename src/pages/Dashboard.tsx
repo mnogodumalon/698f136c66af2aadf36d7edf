@@ -1,50 +1,60 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import type { Raeume, Dozenten, Kurse, Teilnehmer, Anmeldungen } from '@/types/app';
 import { APP_IDS } from '@/types/app';
 import { LivingAppsService, extractRecordId, createRecordUrl } from '@/services/livingAppsService';
-import { format, parseISO, formatDistance } from 'date-fns';
+import { format, parseISO } from 'date-fns';
 import { de } from 'date-fns/locale';
 import { toast } from 'sonner';
-import {
-  BookOpen, GraduationCap, DoorOpen, Users, Euro,
-  Plus, Pencil, Trash2, AlertCircle, RefreshCw,
-} from 'lucide-react';
-import {
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
-} from 'recharts';
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Textarea } from '@/components/ui/textarea';
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from '@/components/ui/select';
+  Plus,
+  Pencil,
+  Trash2,
+  Users,
+  GraduationCap,
+  BookOpen,
+  DoorOpen,
+  ClipboardList,
+  AlertCircle,
+  RefreshCw,
+} from 'lucide-react';
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
-} from '@/components/ui/dialog';
-import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
-  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
-import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from '@/components/ui/table';
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+  Cell,
+} from 'recharts';
+import { useIsMobile } from '@/hooks/use-mobile';
 
-// ─── Utility functions ───────────────────────────────────────────────
+// ─── Utility Functions ───────────────────────────────────────────────
 
-function formatCurrency(value: number | null | undefined): string {
-  if (value == null) return '–';
-  return new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(value);
-}
-
-function formatDate(dateStr: string | null | undefined): string {
-  if (!dateStr) return '–';
+function formatDate(dateStr: string | undefined | null): string {
+  if (!dateStr) return '-';
   try {
     return format(parseISO(dateStr.split('T')[0]), 'dd.MM.yyyy', { locale: de });
   } catch {
@@ -52,69 +62,63 @@ function formatDate(dateStr: string | null | undefined): string {
   }
 }
 
-function relativeDate(dateStr: string | null | undefined): string {
-  if (!dateStr) return '–';
-  try {
-    return formatDistance(parseISO(dateStr.split('T')[0]), new Date(), { addSuffix: true, locale: de });
-  } catch {
-    return dateStr;
-  }
+function formatCurrency(value: number | undefined | null): string {
+  if (value == null) return '-';
+  return new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(value);
 }
 
 function todayStr(): string {
   return format(new Date(), 'yyyy-MM-dd');
 }
 
-// ─── Progress Ring SVG ───────────────────────────────────────────────
+// ─── Delete Confirmation Dialog ──────────────────────────────────────
 
-function ProgressRing({ percent, size = 160, stroke = 6 }: { percent: number; size?: number; stroke?: number }) {
-  const radius = (size - stroke) / 2;
-  const circumference = 2 * Math.PI * radius;
-  const offset = circumference - (Math.min(percent, 100) / 100) * circumference;
-  return (
-    <svg width={size} height={size} className="transform -rotate-90">
-      <circle cx={size / 2} cy={size / 2} r={radius} fill="none"
-        stroke="hsl(40 15% 90%)" strokeWidth={stroke} />
-      <circle cx={size / 2} cy={size / 2} r={radius} fill="none"
-        stroke="hsl(178 45% 30%)" strokeWidth={stroke}
-        strokeDasharray={circumference} strokeDashoffset={offset}
-        strokeLinecap="round" className="transition-all duration-700 ease-out" />
-    </svg>
-  );
-}
-
-// ─── Delete Confirm Dialog ───────────────────────────────────────────
-
-function DeleteConfirmDialog({ open, onOpenChange, name, onConfirm }: {
-  open: boolean; onOpenChange: (o: boolean) => void; name: string; onConfirm: () => Promise<void>;
+function DeleteConfirmDialog({
+  open,
+  onOpenChange,
+  recordName,
+  onConfirm,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  recordName: string;
+  onConfirm: () => Promise<void>;
 }) {
   const [deleting, setDeleting] = useState(false);
+
   async function handleDelete() {
     setDeleting(true);
     try {
       await onConfirm();
-      toast.success(`"${name}" wurde gelöscht.`);
+      toast.success('Geloescht', { description: `"${recordName}" wurde geloescht.` });
       onOpenChange(false);
-    } catch {
-      toast.error('Eintrag konnte nicht gelöscht werden.');
+    } catch (err) {
+      toast.error('Fehler', {
+        description: `Eintrag konnte nicht geloescht werden: ${err instanceof Error ? err.message : 'Unbekannter Fehler'}`,
+      });
     } finally {
       setDeleting(false);
     }
   }
+
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Eintrag löschen?</AlertDialogTitle>
+          <AlertDialogTitle>Eintrag loeschen?</AlertDialogTitle>
           <AlertDialogDescription>
-            Möchtest du &quot;{name}&quot; wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.
+            Moechtest du &quot;{recordName}&quot; wirklich loeschen? Diese Aktion kann nicht
+            rueckgaengig gemacht werden.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>Abbrechen</AlertDialogCancel>
-          <AlertDialogAction onClick={handleDelete} disabled={deleting}
-            className="bg-destructive text-white hover:bg-destructive/90">
-            {deleting ? 'Löscht...' : 'Löschen'}
+          <AlertDialogAction
+            onClick={handleDelete}
+            disabled={deleting}
+            className="bg-destructive text-white hover:bg-destructive/90"
+          >
+            {deleting ? 'Loescht...' : 'Loeschen'}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -122,18 +126,30 @@ function DeleteConfirmDialog({ open, onOpenChange, name, onConfirm }: {
   );
 }
 
-// ─── Räume CRUD Dialog ───────────────────────────────────────────────
+// ─── Raeume Dialog ───────────────────────────────────────────────────
 
-function RaeumeDialog({ open, onOpenChange, record, onSuccess }: {
-  open: boolean; onOpenChange: (o: boolean) => void; record?: Raeume | null; onSuccess: () => void;
+function RaeumeDialog({
+  open,
+  onOpenChange,
+  record,
+  onSuccess,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  record: Raeume | null;
+  onSuccess: () => void;
 }) {
-  const isEdit = !!record;
+  const isEditing = !!record;
   const [submitting, setSubmitting] = useState(false);
-  const [form, setForm] = useState({ raumname: '', gebaeude: '', kapazitaet: '' });
+  const [formData, setFormData] = useState({
+    raumname: '',
+    gebaeude: '',
+    kapazitaet: '',
+  });
 
   useEffect(() => {
     if (open) {
-      setForm({
+      setFormData({
         raumname: record?.fields.raumname ?? '',
         gebaeude: record?.fields.gebaeude ?? '',
         kapazitaet: record?.fields.kapazitaet?.toString() ?? '',
@@ -144,23 +160,25 @@ function RaeumeDialog({ open, onOpenChange, record, onSuccess }: {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitting(true);
-    const fields = {
-      raumname: form.raumname,
-      gebaeude: form.gebaeude,
-      kapazitaet: form.kapazitaet ? Number(form.kapazitaet) : undefined,
-    };
     try {
-      if (isEdit) {
+      const fields: Raeume['fields'] = {
+        raumname: formData.raumname,
+        gebaeude: formData.gebaeude || undefined,
+        kapazitaet: formData.kapazitaet ? Number(formData.kapazitaet) : undefined,
+      };
+      if (isEditing) {
         await LivingAppsService.updateRaeumeEntry(record!.record_id, fields);
-        toast.success('Raum aktualisiert.');
+        toast.success('Gespeichert', { description: 'Raum wurde aktualisiert.' });
       } else {
         await LivingAppsService.createRaeumeEntry(fields);
-        toast.success('Raum erstellt.');
+        toast.success('Erstellt', { description: 'Neuer Raum wurde erstellt.' });
       }
       onOpenChange(false);
       onSuccess();
-    } catch {
-      toast.error(`Fehler beim ${isEdit ? 'Speichern' : 'Erstellen'}.`);
+    } catch (err) {
+      toast.error('Fehler', {
+        description: `Fehler beim ${isEditing ? 'Speichern' : 'Erstellen'}: ${err instanceof Error ? err.message : 'Unbekannter Fehler'}`,
+      });
     } finally {
       setSubmitting(false);
     }
@@ -170,24 +188,43 @@ function RaeumeDialog({ open, onOpenChange, record, onSuccess }: {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>{isEdit ? 'Raum bearbeiten' : 'Neuer Raum'}</DialogTitle>
+          <DialogTitle>{isEditing ? 'Raum bearbeiten' : 'Neuer Raum'}</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="raumname">Raumname</Label>
-            <Input id="raumname" value={form.raumname} onChange={e => setForm(p => ({ ...p, raumname: e.target.value }))} required />
+            <Label htmlFor="raumname">Raumname *</Label>
+            <Input
+              id="raumname"
+              value={formData.raumname}
+              onChange={(e) => setFormData((p) => ({ ...p, raumname: e.target.value }))}
+              required
+            />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="gebaeude">Gebäude</Label>
-            <Input id="gebaeude" value={form.gebaeude} onChange={e => setForm(p => ({ ...p, gebaeude: e.target.value }))} />
+            <Label htmlFor="gebaeude">Gebaeude</Label>
+            <Input
+              id="gebaeude"
+              value={formData.gebaeude}
+              onChange={(e) => setFormData((p) => ({ ...p, gebaeude: e.target.value }))}
+            />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="kapazitaet">Kapazität</Label>
-            <Input id="kapazitaet" type="number" value={form.kapazitaet} onChange={e => setForm(p => ({ ...p, kapazitaet: e.target.value }))} />
+            <Label htmlFor="kapazitaet">Kapazitaet</Label>
+            <Input
+              id="kapazitaet"
+              type="number"
+              min={0}
+              value={formData.kapazitaet}
+              onChange={(e) => setFormData((p) => ({ ...p, kapazitaet: e.target.value }))}
+            />
           </div>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Abbrechen</Button>
-            <Button type="submit" disabled={submitting}>{submitting ? 'Speichert...' : (isEdit ? 'Speichern' : 'Erstellen')}</Button>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              Abbrechen
+            </Button>
+            <Button type="submit" disabled={submitting}>
+              {submitting ? 'Speichert...' : isEditing ? 'Speichern' : 'Erstellen'}
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>
@@ -195,18 +232,32 @@ function RaeumeDialog({ open, onOpenChange, record, onSuccess }: {
   );
 }
 
-// ─── Dozenten CRUD Dialog ────────────────────────────────────────────
+// ─── Dozenten Dialog ─────────────────────────────────────────────────
 
-function DozentenDialog({ open, onOpenChange, record, onSuccess }: {
-  open: boolean; onOpenChange: (o: boolean) => void; record?: Dozenten | null; onSuccess: () => void;
+function DozentenDialog({
+  open,
+  onOpenChange,
+  record,
+  onSuccess,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  record: Dozenten | null;
+  onSuccess: () => void;
 }) {
-  const isEdit = !!record;
+  const isEditing = !!record;
   const [submitting, setSubmitting] = useState(false);
-  const [form, setForm] = useState({ dozent_firstname: '', dozent_lastname: '', email: '', telefon: '', fachgebiet: '' });
+  const [formData, setFormData] = useState({
+    dozent_firstname: '',
+    dozent_lastname: '',
+    email: '',
+    telefon: '',
+    fachgebiet: '',
+  });
 
   useEffect(() => {
     if (open) {
-      setForm({
+      setFormData({
         dozent_firstname: record?.fields.dozent_firstname ?? '',
         dozent_lastname: record?.fields.dozent_lastname ?? '',
         email: record?.fields.email ?? '',
@@ -220,17 +271,26 @@ function DozentenDialog({ open, onOpenChange, record, onSuccess }: {
     e.preventDefault();
     setSubmitting(true);
     try {
-      if (isEdit) {
-        await LivingAppsService.updateDozentenEntry(record!.record_id, form);
-        toast.success('Dozent aktualisiert.');
+      const fields: Dozenten['fields'] = {
+        dozent_firstname: formData.dozent_firstname,
+        dozent_lastname: formData.dozent_lastname,
+        email: formData.email || undefined,
+        telefon: formData.telefon || undefined,
+        fachgebiet: formData.fachgebiet || undefined,
+      };
+      if (isEditing) {
+        await LivingAppsService.updateDozentenEntry(record!.record_id, fields);
+        toast.success('Gespeichert', { description: 'Dozent wurde aktualisiert.' });
       } else {
-        await LivingAppsService.createDozentenEntry(form);
-        toast.success('Dozent erstellt.');
+        await LivingAppsService.createDozentenEntry(fields);
+        toast.success('Erstellt', { description: 'Neuer Dozent wurde erstellt.' });
       }
       onOpenChange(false);
       onSuccess();
-    } catch {
-      toast.error(`Fehler beim ${isEdit ? 'Speichern' : 'Erstellen'}.`);
+    } catch (err) {
+      toast.error('Fehler', {
+        description: `Fehler beim ${isEditing ? 'Speichern' : 'Erstellen'}: ${err instanceof Error ? err.message : 'Unbekannter Fehler'}`,
+      });
     } finally {
       setSubmitting(false);
     }
@@ -240,34 +300,62 @@ function DozentenDialog({ open, onOpenChange, record, onSuccess }: {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>{isEdit ? 'Dozent bearbeiten' : 'Neuer Dozent'}</DialogTitle>
+          <DialogTitle>{isEditing ? 'Dozent bearbeiten' : 'Neuer Dozent'}</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="d_fn">Vorname</Label>
-              <Input id="d_fn" value={form.dozent_firstname} onChange={e => setForm(p => ({ ...p, dozent_firstname: e.target.value }))} required />
+              <Label htmlFor="dozent_firstname">Vorname *</Label>
+              <Input
+                id="dozent_firstname"
+                value={formData.dozent_firstname}
+                onChange={(e) => setFormData((p) => ({ ...p, dozent_firstname: e.target.value }))}
+                required
+              />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="d_ln">Nachname</Label>
-              <Input id="d_ln" value={form.dozent_lastname} onChange={e => setForm(p => ({ ...p, dozent_lastname: e.target.value }))} required />
+              <Label htmlFor="dozent_lastname">Nachname *</Label>
+              <Input
+                id="dozent_lastname"
+                value={formData.dozent_lastname}
+                onChange={(e) => setFormData((p) => ({ ...p, dozent_lastname: e.target.value }))}
+                required
+              />
             </div>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="d_email">E-Mail</Label>
-            <Input id="d_email" type="email" value={form.email} onChange={e => setForm(p => ({ ...p, email: e.target.value }))} />
+            <Label htmlFor="dozent_email">E-Mail</Label>
+            <Input
+              id="dozent_email"
+              type="email"
+              value={formData.email}
+              onChange={(e) => setFormData((p) => ({ ...p, email: e.target.value }))}
+            />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="d_tel">Telefon</Label>
-            <Input id="d_tel" type="tel" value={form.telefon} onChange={e => setForm(p => ({ ...p, telefon: e.target.value }))} />
+            <Label htmlFor="dozent_telefon">Telefon</Label>
+            <Input
+              id="dozent_telefon"
+              type="tel"
+              value={formData.telefon}
+              onChange={(e) => setFormData((p) => ({ ...p, telefon: e.target.value }))}
+            />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="d_fg">Fachgebiet</Label>
-            <Input id="d_fg" value={form.fachgebiet} onChange={e => setForm(p => ({ ...p, fachgebiet: e.target.value }))} />
+            <Label htmlFor="fachgebiet">Fachgebiet</Label>
+            <Input
+              id="fachgebiet"
+              value={formData.fachgebiet}
+              onChange={(e) => setFormData((p) => ({ ...p, fachgebiet: e.target.value }))}
+            />
           </div>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Abbrechen</Button>
-            <Button type="submit" disabled={submitting}>{submitting ? 'Speichert...' : (isEdit ? 'Speichern' : 'Erstellen')}</Button>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              Abbrechen
+            </Button>
+            <Button type="submit" disabled={submitting}>
+              {submitting ? 'Speichert...' : isEditing ? 'Speichern' : 'Erstellen'}
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>
@@ -275,149 +363,32 @@ function DozentenDialog({ open, onOpenChange, record, onSuccess }: {
   );
 }
 
-// ─── Kurse CRUD Dialog ───────────────────────────────────────────────
+// ─── Teilnehmer Dialog ───────────────────────────────────────────────
 
-function KurseDialog({ open, onOpenChange, record, onSuccess, raeume, dozenten }: {
-  open: boolean; onOpenChange: (o: boolean) => void; record?: Kurse | null; onSuccess: () => void;
-  raeume: Raeume[]; dozenten: Dozenten[];
+function TeilnehmerDialog({
+  open,
+  onOpenChange,
+  record,
+  onSuccess,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  record: Teilnehmer | null;
+  onSuccess: () => void;
 }) {
-  const isEdit = !!record;
+  const isEditing = !!record;
   const [submitting, setSubmitting] = useState(false);
-  const [form, setForm] = useState({
-    titel: '', beschreibung: '', startdatum: '', enddatum: '',
-    max_teilnehmer: '', preis: '', raum: 'none', dozent: 'none',
+  const [formData, setFormData] = useState({
+    teilnehmer_firstname: '',
+    teilnehmer_lastname: '',
+    email: '',
+    telefon: '',
+    geburtsdatum: '',
   });
 
   useEffect(() => {
     if (open) {
-      setForm({
-        titel: record?.fields.titel ?? '',
-        beschreibung: record?.fields.beschreibung ?? '',
-        startdatum: record?.fields.startdatum?.split('T')[0] ?? '',
-        enddatum: record?.fields.enddatum?.split('T')[0] ?? '',
-        max_teilnehmer: record?.fields.max_teilnehmer?.toString() ?? '',
-        preis: record?.fields.preis?.toString() ?? '',
-        raum: extractRecordId(record?.fields.raum) ?? 'none',
-        dozent: extractRecordId(record?.fields.dozent) ?? 'none',
-      });
-    }
-  }, [open, record]);
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setSubmitting(true);
-    const fields: Kurse['fields'] = {
-      titel: form.titel,
-      beschreibung: form.beschreibung || undefined,
-      startdatum: form.startdatum || undefined,
-      enddatum: form.enddatum || undefined,
-      max_teilnehmer: form.max_teilnehmer ? Number(form.max_teilnehmer) : undefined,
-      preis: form.preis ? Number(form.preis) : undefined,
-      raum: form.raum !== 'none' ? createRecordUrl(APP_IDS.RAEUME, form.raum) : undefined,
-      dozent: form.dozent !== 'none' ? createRecordUrl(APP_IDS.DOZENTEN, form.dozent) : undefined,
-    };
-    try {
-      if (isEdit) {
-        await LivingAppsService.updateKurseEntry(record!.record_id, fields);
-        toast.success('Kurs aktualisiert.');
-      } else {
-        await LivingAppsService.createKurseEntry(fields);
-        toast.success('Kurs erstellt.');
-      }
-      onOpenChange(false);
-      onSuccess();
-    } catch {
-      toast.error(`Fehler beim ${isEdit ? 'Speichern' : 'Erstellen'}.`);
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>{isEdit ? 'Kurs bearbeiten' : 'Neuer Kurs'}</DialogTitle>
-        </DialogHeader>
-        <form onSubmit={handleSubmit} className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
-          <div className="space-y-2">
-            <Label htmlFor="k_titel">Kurstitel</Label>
-            <Input id="k_titel" value={form.titel} onChange={e => setForm(p => ({ ...p, titel: e.target.value }))} required />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="k_beschr">Beschreibung</Label>
-            <Textarea id="k_beschr" value={form.beschreibung} onChange={e => setForm(p => ({ ...p, beschreibung: e.target.value }))} rows={3} />
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="k_start">Startdatum</Label>
-              <Input id="k_start" type="date" value={form.startdatum} onChange={e => setForm(p => ({ ...p, startdatum: e.target.value }))} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="k_end">Enddatum</Label>
-              <Input id="k_end" type="date" value={form.enddatum} onChange={e => setForm(p => ({ ...p, enddatum: e.target.value }))} />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="k_max">Max. Teilnehmer</Label>
-              <Input id="k_max" type="number" value={form.max_teilnehmer} onChange={e => setForm(p => ({ ...p, max_teilnehmer: e.target.value }))} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="k_preis">Preis (EUR)</Label>
-              <Input id="k_preis" type="number" step="0.01" value={form.preis} onChange={e => setForm(p => ({ ...p, preis: e.target.value }))} />
-            </div>
-          </div>
-          <div className="space-y-2">
-            <Label>Raum</Label>
-            <Select value={form.raum} onValueChange={v => setForm(p => ({ ...p, raum: v }))}>
-              <SelectTrigger className="w-full"><SelectValue placeholder="Raum wählen..." /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">Kein Raum</SelectItem>
-                {raeume.map(r => (
-                  <SelectItem key={r.record_id} value={r.record_id}>
-                    {r.fields.raumname ?? 'Unbenannt'}{r.fields.gebaeude ? ` (${r.fields.gebaeude})` : ''}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-2">
-            <Label>Dozent</Label>
-            <Select value={form.dozent} onValueChange={v => setForm(p => ({ ...p, dozent: v }))}>
-              <SelectTrigger className="w-full"><SelectValue placeholder="Dozent wählen..." /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">Kein Dozent</SelectItem>
-                {dozenten.map(d => (
-                  <SelectItem key={d.record_id} value={d.record_id}>
-                    {d.fields.dozent_firstname ?? ''} {d.fields.dozent_lastname ?? ''}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Abbrechen</Button>
-            <Button type="submit" disabled={submitting}>{submitting ? 'Speichert...' : (isEdit ? 'Speichern' : 'Erstellen')}</Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// ─── Teilnehmer CRUD Dialog ─────────────────────────────────────────
-
-function TeilnehmerDialog({ open, onOpenChange, record, onSuccess }: {
-  open: boolean; onOpenChange: (o: boolean) => void; record?: Teilnehmer | null; onSuccess: () => void;
-}) {
-  const isEdit = !!record;
-  const [submitting, setSubmitting] = useState(false);
-  const [form, setForm] = useState({ teilnehmer_firstname: '', teilnehmer_lastname: '', email: '', telefon: '', geburtsdatum: '' });
-
-  useEffect(() => {
-    if (open) {
-      setForm({
+      setFormData({
         teilnehmer_firstname: record?.fields.teilnehmer_firstname ?? '',
         teilnehmer_lastname: record?.fields.teilnehmer_lastname ?? '',
         email: record?.fields.email ?? '',
@@ -430,25 +401,27 @@ function TeilnehmerDialog({ open, onOpenChange, record, onSuccess }: {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitting(true);
-    const fields: Teilnehmer['fields'] = {
-      teilnehmer_firstname: form.teilnehmer_firstname,
-      teilnehmer_lastname: form.teilnehmer_lastname,
-      email: form.email || undefined,
-      telefon: form.telefon || undefined,
-      geburtsdatum: form.geburtsdatum || undefined,
-    };
     try {
-      if (isEdit) {
+      const fields: Teilnehmer['fields'] = {
+        teilnehmer_firstname: formData.teilnehmer_firstname,
+        teilnehmer_lastname: formData.teilnehmer_lastname,
+        email: formData.email || undefined,
+        telefon: formData.telefon || undefined,
+        geburtsdatum: formData.geburtsdatum || undefined,
+      };
+      if (isEditing) {
         await LivingAppsService.updateTeilnehmerEntry(record!.record_id, fields);
-        toast.success('Teilnehmer aktualisiert.');
+        toast.success('Gespeichert', { description: 'Teilnehmer wurde aktualisiert.' });
       } else {
         await LivingAppsService.createTeilnehmerEntry(fields);
-        toast.success('Teilnehmer erstellt.');
+        toast.success('Erstellt', { description: 'Neuer Teilnehmer wurde erstellt.' });
       }
       onOpenChange(false);
       onSuccess();
-    } catch {
-      toast.error(`Fehler beim ${isEdit ? 'Speichern' : 'Erstellen'}.`);
+    } catch (err) {
+      toast.error('Fehler', {
+        description: `Fehler beim ${isEditing ? 'Speichern' : 'Erstellen'}: ${err instanceof Error ? err.message : 'Unbekannter Fehler'}`,
+      });
     } finally {
       setSubmitting(false);
     }
@@ -458,34 +431,67 @@ function TeilnehmerDialog({ open, onOpenChange, record, onSuccess }: {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>{isEdit ? 'Teilnehmer bearbeiten' : 'Neuer Teilnehmer'}</DialogTitle>
+          <DialogTitle>{isEditing ? 'Teilnehmer bearbeiten' : 'Neuer Teilnehmer'}</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="t_fn">Vorname</Label>
-              <Input id="t_fn" value={form.teilnehmer_firstname} onChange={e => setForm(p => ({ ...p, teilnehmer_firstname: e.target.value }))} required />
+              <Label htmlFor="tn_firstname">Vorname *</Label>
+              <Input
+                id="tn_firstname"
+                value={formData.teilnehmer_firstname}
+                onChange={(e) =>
+                  setFormData((p) => ({ ...p, teilnehmer_firstname: e.target.value }))
+                }
+                required
+              />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="t_ln">Nachname</Label>
-              <Input id="t_ln" value={form.teilnehmer_lastname} onChange={e => setForm(p => ({ ...p, teilnehmer_lastname: e.target.value }))} required />
+              <Label htmlFor="tn_lastname">Nachname *</Label>
+              <Input
+                id="tn_lastname"
+                value={formData.teilnehmer_lastname}
+                onChange={(e) =>
+                  setFormData((p) => ({ ...p, teilnehmer_lastname: e.target.value }))
+                }
+                required
+              />
             </div>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="t_email">E-Mail</Label>
-            <Input id="t_email" type="email" value={form.email} onChange={e => setForm(p => ({ ...p, email: e.target.value }))} />
+            <Label htmlFor="tn_email">E-Mail</Label>
+            <Input
+              id="tn_email"
+              type="email"
+              value={formData.email}
+              onChange={(e) => setFormData((p) => ({ ...p, email: e.target.value }))}
+            />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="t_tel">Telefon</Label>
-            <Input id="t_tel" type="tel" value={form.telefon} onChange={e => setForm(p => ({ ...p, telefon: e.target.value }))} />
+            <Label htmlFor="tn_telefon">Telefon</Label>
+            <Input
+              id="tn_telefon"
+              type="tel"
+              value={formData.telefon}
+              onChange={(e) => setFormData((p) => ({ ...p, telefon: e.target.value }))}
+            />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="t_geb">Geburtsdatum</Label>
-            <Input id="t_geb" type="date" value={form.geburtsdatum} onChange={e => setForm(p => ({ ...p, geburtsdatum: e.target.value }))} />
+            <Label htmlFor="tn_geburtsdatum">Geburtsdatum</Label>
+            <Input
+              id="tn_geburtsdatum"
+              type="date"
+              value={formData.geburtsdatum}
+              onChange={(e) => setFormData((p) => ({ ...p, geburtsdatum: e.target.value }))}
+            />
           </div>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Abbrechen</Button>
-            <Button type="submit" disabled={submitting}>{submitting ? 'Speichert...' : (isEdit ? 'Speichern' : 'Erstellen')}</Button>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              Abbrechen
+            </Button>
+            <Button type="submit" disabled={submitting}>
+              {submitting ? 'Speichert...' : isEditing ? 'Speichern' : 'Erstellen'}
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>
@@ -493,21 +499,245 @@ function TeilnehmerDialog({ open, onOpenChange, record, onSuccess }: {
   );
 }
 
-// ─── Anmeldungen CRUD Dialog ─────────────────────────────────────────
+// ─── Kurse Dialog ────────────────────────────────────────────────────
 
-function AnmeldungenDialog({ open, onOpenChange, record, onSuccess, teilnehmer, kurse }: {
-  open: boolean; onOpenChange: (o: boolean) => void; record?: Anmeldungen | null; onSuccess: () => void;
-  teilnehmer: Teilnehmer[]; kurse: Kurse[];
+function KurseDialog({
+  open,
+  onOpenChange,
+  record,
+  onSuccess,
+  dozenten,
+  raeume,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  record: Kurse | null;
+  onSuccess: () => void;
+  dozenten: Dozenten[];
+  raeume: Raeume[];
 }) {
-  const isEdit = !!record;
+  const isEditing = !!record;
   const [submitting, setSubmitting] = useState(false);
-  const [form, setForm] = useState({ teilnehmer: 'none', kurs: 'none', anmeldedatum: '', bezahlt: false });
+  const [formData, setFormData] = useState({
+    titel: '',
+    beschreibung: '',
+    startdatum: '',
+    enddatum: '',
+    max_teilnehmer: '',
+    preis: '',
+    dozent: 'none',
+    raum: 'none',
+  });
 
   useEffect(() => {
     if (open) {
-      setForm({
-        teilnehmer: extractRecordId(record?.fields.teilnehmer) ?? 'none',
-        kurs: extractRecordId(record?.fields.kurs) ?? 'none',
+      const dozentId = extractRecordId(record?.fields.dozent ?? null);
+      const raumId = extractRecordId(record?.fields.raum ?? null);
+      setFormData({
+        titel: record?.fields.titel ?? '',
+        beschreibung: record?.fields.beschreibung ?? '',
+        startdatum: record?.fields.startdatum?.split('T')[0] ?? todayStr(),
+        enddatum: record?.fields.enddatum?.split('T')[0] ?? '',
+        max_teilnehmer: record?.fields.max_teilnehmer?.toString() ?? '',
+        preis: record?.fields.preis?.toString() ?? '',
+        dozent: dozentId ?? 'none',
+        raum: raumId ?? 'none',
+      });
+    }
+  }, [open, record]);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setSubmitting(true);
+    try {
+      const fields: Kurse['fields'] = {
+        titel: formData.titel,
+        beschreibung: formData.beschreibung || undefined,
+        startdatum: formData.startdatum || undefined,
+        enddatum: formData.enddatum || undefined,
+        max_teilnehmer: formData.max_teilnehmer ? Number(formData.max_teilnehmer) : undefined,
+        preis: formData.preis ? Number(formData.preis) : undefined,
+        dozent:
+          formData.dozent !== 'none'
+            ? createRecordUrl(APP_IDS.DOZENTEN, formData.dozent)
+            : undefined,
+        raum:
+          formData.raum !== 'none'
+            ? createRecordUrl(APP_IDS.RAEUME, formData.raum)
+            : undefined,
+      };
+      if (isEditing) {
+        await LivingAppsService.updateKurseEntry(record!.record_id, fields);
+        toast.success('Gespeichert', { description: 'Kurs wurde aktualisiert.' });
+      } else {
+        await LivingAppsService.createKurseEntry(fields);
+        toast.success('Erstellt', { description: 'Neuer Kurs wurde erstellt.' });
+      }
+      onOpenChange(false);
+      onSuccess();
+    } catch (err) {
+      toast.error('Fehler', {
+        description: `Fehler beim ${isEditing ? 'Speichern' : 'Erstellen'}: ${err instanceof Error ? err.message : 'Unbekannter Fehler'}`,
+      });
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{isEditing ? 'Kurs bearbeiten' : 'Neuer Kurs'}</DialogTitle>
+        </DialogHeader>
+        <form onSubmit={handleSubmit} className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
+          <div className="space-y-2">
+            <Label htmlFor="kurs_titel">Kurstitel *</Label>
+            <Input
+              id="kurs_titel"
+              value={formData.titel}
+              onChange={(e) => setFormData((p) => ({ ...p, titel: e.target.value }))}
+              required
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="kurs_beschreibung">Beschreibung</Label>
+            <Textarea
+              id="kurs_beschreibung"
+              value={formData.beschreibung}
+              onChange={(e) => setFormData((p) => ({ ...p, beschreibung: e.target.value }))}
+              rows={3}
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="kurs_start">Startdatum *</Label>
+              <Input
+                id="kurs_start"
+                type="date"
+                value={formData.startdatum}
+                onChange={(e) => setFormData((p) => ({ ...p, startdatum: e.target.value }))}
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="kurs_end">Enddatum</Label>
+              <Input
+                id="kurs_end"
+                type="date"
+                value={formData.enddatum}
+                onChange={(e) => setFormData((p) => ({ ...p, enddatum: e.target.value }))}
+              />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="kurs_max">Max. Teilnehmer</Label>
+              <Input
+                id="kurs_max"
+                type="number"
+                min={0}
+                value={formData.max_teilnehmer}
+                onChange={(e) => setFormData((p) => ({ ...p, max_teilnehmer: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="kurs_preis">Preis (EUR)</Label>
+              <Input
+                id="kurs_preis"
+                type="number"
+                min={0}
+                step="0.01"
+                value={formData.preis}
+                onChange={(e) => setFormData((p) => ({ ...p, preis: e.target.value }))}
+              />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label>Dozent</Label>
+            <Select
+              value={formData.dozent}
+              onValueChange={(v) => setFormData((p) => ({ ...p, dozent: v }))}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Dozent waehlen..." />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">Kein Dozent</SelectItem>
+                {dozenten.map((d) => (
+                  <SelectItem key={d.record_id} value={d.record_id}>
+                    {d.fields.dozent_firstname} {d.fields.dozent_lastname}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label>Raum</Label>
+            <Select
+              value={formData.raum}
+              onValueChange={(v) => setFormData((p) => ({ ...p, raum: v }))}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Raum waehlen..." />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">Kein Raum</SelectItem>
+                {raeume.map((r) => (
+                  <SelectItem key={r.record_id} value={r.record_id}>
+                    {r.fields.raumname} {r.fields.gebaeude ? `(${r.fields.gebaeude})` : ''}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              Abbrechen
+            </Button>
+            <Button type="submit" disabled={submitting}>
+              {submitting ? 'Speichert...' : isEditing ? 'Speichern' : 'Erstellen'}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── Anmeldungen Dialog ──────────────────────────────────────────────
+
+function AnmeldungenDialog({
+  open,
+  onOpenChange,
+  record,
+  onSuccess,
+  teilnehmer,
+  kurse,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  record: Anmeldungen | null;
+  onSuccess: () => void;
+  teilnehmer: Teilnehmer[];
+  kurse: Kurse[];
+}) {
+  const isEditing = !!record;
+  const [submitting, setSubmitting] = useState(false);
+  const [formData, setFormData] = useState({
+    teilnehmer: 'none',
+    kurs: 'none',
+    anmeldedatum: '',
+    bezahlt: false,
+  });
+
+  useEffect(() => {
+    if (open) {
+      const tnId = extractRecordId(record?.fields.teilnehmer ?? null);
+      const kursId = extractRecordId(record?.fields.kurs ?? null);
+      setFormData({
+        teilnehmer: tnId ?? 'none',
+        kurs: kursId ?? 'none',
         anmeldedatum: record?.fields.anmeldedatum?.split('T')[0] ?? todayStr(),
         bezahlt: record?.fields.bezahlt ?? false,
       });
@@ -516,29 +746,31 @@ function AnmeldungenDialog({ open, onOpenChange, record, onSuccess, teilnehmer, 
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (form.teilnehmer === 'none' || form.kurs === 'none') {
-      toast.error('Bitte Teilnehmer und Kurs auswählen.');
+    if (formData.teilnehmer === 'none' || formData.kurs === 'none') {
+      toast.error('Fehler', { description: 'Bitte Teilnehmer und Kurs auswaehlen.' });
       return;
     }
     setSubmitting(true);
-    const fields: Anmeldungen['fields'] = {
-      teilnehmer: createRecordUrl(APP_IDS.TEILNEHMER, form.teilnehmer),
-      kurs: createRecordUrl(APP_IDS.KURSE, form.kurs),
-      anmeldedatum: form.anmeldedatum || undefined,
-      bezahlt: form.bezahlt,
-    };
     try {
-      if (isEdit) {
+      const fields: Anmeldungen['fields'] = {
+        teilnehmer: createRecordUrl(APP_IDS.TEILNEHMER, formData.teilnehmer),
+        kurs: createRecordUrl(APP_IDS.KURSE, formData.kurs),
+        anmeldedatum: formData.anmeldedatum || undefined,
+        bezahlt: formData.bezahlt,
+      };
+      if (isEditing) {
         await LivingAppsService.updateAnmeldungenEntry(record!.record_id, fields);
-        toast.success('Anmeldung aktualisiert.');
+        toast.success('Gespeichert', { description: 'Anmeldung wurde aktualisiert.' });
       } else {
         await LivingAppsService.createAnmeldungenEntry(fields);
-        toast.success('Anmeldung erstellt.');
+        toast.success('Erstellt', { description: 'Neue Anmeldung wurde erstellt.' });
       }
       onOpenChange(false);
       onSuccess();
-    } catch {
-      toast.error(`Fehler beim ${isEdit ? 'Speichern' : 'Erstellen'}.`);
+    } catch (err) {
+      toast.error('Fehler', {
+        description: `Fehler beim ${isEditing ? 'Speichern' : 'Erstellen'}: ${err instanceof Error ? err.message : 'Unbekannter Fehler'}`,
+      });
     } finally {
       setSubmitting(false);
     }
@@ -548,49 +780,75 @@ function AnmeldungenDialog({ open, onOpenChange, record, onSuccess, teilnehmer, 
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>{isEdit ? 'Anmeldung bearbeiten' : 'Neue Anmeldung'}</DialogTitle>
+          <DialogTitle>{isEditing ? 'Anmeldung bearbeiten' : 'Neue Anmeldung'}</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
-            <Label>Teilnehmer</Label>
-            <Select value={form.teilnehmer} onValueChange={v => setForm(p => ({ ...p, teilnehmer: v }))}>
-              <SelectTrigger className="w-full"><SelectValue placeholder="Teilnehmer wählen..." /></SelectTrigger>
+            <Label>Teilnehmer *</Label>
+            <Select
+              value={formData.teilnehmer}
+              onValueChange={(v) => setFormData((p) => ({ ...p, teilnehmer: v }))}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Teilnehmer waehlen..." />
+              </SelectTrigger>
               <SelectContent>
-                <SelectItem value="none">– Bitte wählen –</SelectItem>
-                {teilnehmer.map(t => (
+                <SelectItem value="none">-- Bitte waehlen --</SelectItem>
+                {teilnehmer.map((t) => (
                   <SelectItem key={t.record_id} value={t.record_id}>
-                    {t.fields.teilnehmer_firstname ?? ''} {t.fields.teilnehmer_lastname ?? ''}
+                    {t.fields.teilnehmer_firstname} {t.fields.teilnehmer_lastname}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
           <div className="space-y-2">
-            <Label>Kurs</Label>
-            <Select value={form.kurs} onValueChange={v => setForm(p => ({ ...p, kurs: v }))}>
-              <SelectTrigger className="w-full"><SelectValue placeholder="Kurs wählen..." /></SelectTrigger>
+            <Label>Kurs *</Label>
+            <Select
+              value={formData.kurs}
+              onValueChange={(v) => setFormData((p) => ({ ...p, kurs: v }))}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Kurs waehlen..." />
+              </SelectTrigger>
               <SelectContent>
-                <SelectItem value="none">– Bitte wählen –</SelectItem>
-                {kurse.map(k => (
+                <SelectItem value="none">-- Bitte waehlen --</SelectItem>
+                {kurse.map((k) => (
                   <SelectItem key={k.record_id} value={k.record_id}>
-                    {k.fields.titel ?? 'Unbenannt'}
+                    {k.fields.titel}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="a_datum">Anmeldedatum</Label>
-            <Input id="a_datum" type="date" value={form.anmeldedatum} onChange={e => setForm(p => ({ ...p, anmeldedatum: e.target.value }))} />
+            <Label htmlFor="anm_datum">Anmeldedatum</Label>
+            <Input
+              id="anm_datum"
+              type="date"
+              value={formData.anmeldedatum}
+              onChange={(e) => setFormData((p) => ({ ...p, anmeldedatum: e.target.value }))}
+            />
           </div>
-          <div className="flex items-center space-x-2">
-            <Checkbox id="a_bezahlt" checked={form.bezahlt}
-              onCheckedChange={c => setForm(p => ({ ...p, bezahlt: c === true }))} />
-            <Label htmlFor="a_bezahlt">Bezahlt</Label>
+          <div className="flex items-center gap-2">
+            <Checkbox
+              id="anm_bezahlt"
+              checked={formData.bezahlt}
+              onCheckedChange={(checked) =>
+                setFormData((p) => ({ ...p, bezahlt: checked === true }))
+              }
+            />
+            <Label htmlFor="anm_bezahlt" className="cursor-pointer">
+              Bezahlt
+            </Label>
           </div>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Abbrechen</Button>
-            <Button type="submit" disabled={submitting}>{submitting ? 'Speichert...' : (isEdit ? 'Speichern' : 'Erstellen')}</Button>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              Abbrechen
+            </Button>
+            <Button type="submit" disabled={submitting}>
+              {submitting ? 'Speichert...' : isEditing ? 'Speichern' : 'Erstellen'}
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>
@@ -602,19 +860,20 @@ function AnmeldungenDialog({ open, onOpenChange, record, onSuccess, teilnehmer, 
 
 function LoadingState() {
   return (
-    <div className="min-h-screen bg-background p-6 space-y-6 animate-in fade-in duration-300">
-      <Skeleton className="h-8 w-48" />
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 space-y-6">
-          <Skeleton className="h-64 w-full rounded-lg" />
-          <Skeleton className="h-48 w-full rounded-lg" />
+    <div className="min-h-screen bg-background p-4 md:p-8">
+      <div className="max-w-[1400px] mx-auto space-y-6">
+        <div className="flex items-center justify-between">
+          <Skeleton className="h-8 w-48" />
+          <Skeleton className="h-10 w-40" />
         </div>
-        <div className="space-y-4">
-          <Skeleton className="h-20 w-full rounded-lg" />
-          <Skeleton className="h-20 w-full rounded-lg" />
-          <Skeleton className="h-20 w-full rounded-lg" />
-          <Skeleton className="h-20 w-full rounded-lg" />
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <Skeleton className="h-32" />
+          <Skeleton className="h-32" />
+          <Skeleton className="h-32" />
+          <Skeleton className="h-32" />
         </div>
+        <Skeleton className="h-[300px]" />
+        <Skeleton className="h-[400px]" />
       </div>
     </div>
   );
@@ -624,14 +883,15 @@ function LoadingState() {
 
 function ErrorState({ error, onRetry }: { error: Error; onRetry: () => void }) {
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-6">
+    <div className="min-h-screen bg-background flex items-center justify-center p-4">
       <Card className="max-w-md w-full">
         <CardContent className="pt-6 text-center space-y-4">
           <AlertCircle className="h-12 w-12 text-destructive mx-auto" />
           <h2 className="text-lg font-semibold">Fehler beim Laden</h2>
           <p className="text-sm text-muted-foreground">{error.message}</p>
           <Button onClick={onRetry} variant="outline">
-            <RefreshCw className="h-4 w-4 mr-2" /> Erneut versuchen
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Erneut versuchen
           </Button>
         </CardContent>
       </Card>
@@ -639,35 +899,76 @@ function ErrorState({ error, onRetry }: { error: Error; onRetry: () => void }) {
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-// ─── MAIN DASHBOARD ──────────────────────────────────────────────────
-// ═══════════════════════════════════════════════════════════════════════
+// ─── Empty State ─────────────────────────────────────────────────────
+
+function EmptyTabState({
+  label,
+  onAdd,
+}: {
+  label: string;
+  onAdd: () => void;
+}) {
+  return (
+    <div className="text-center py-12 space-y-3">
+      <p className="text-muted-foreground">Noch keine {label} vorhanden.</p>
+      <Button variant="outline" onClick={onAdd}>
+        <Plus className="h-4 w-4 mr-2" />
+        {label} erstellen
+      </Button>
+    </div>
+  );
+}
+
+// ─── Main Dashboard ──────────────────────────────────────────────────
 
 export default function Dashboard() {
-  // ─── State ─────────────────────────────────────────────────────────
+  const isMobile = useIsMobile();
+
+  // Data state
   const [raeume, setRaeume] = useState<Raeume[]>([]);
   const [dozenten, setDozenten] = useState<Dozenten[]>([]);
   const [kurse, setKurse] = useState<Kurse[]>([]);
   const [teilnehmer, setTeilnehmer] = useState<Teilnehmer[]>([]);
   const [anmeldungen, setAnmeldungen] = useState<Anmeldungen[]>([]);
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
 
-  // CRUD dialog state
-  const [raeumeDialog, setRaeumeDialog] = useState<{ open: boolean; record: Raeume | null }>({ open: false, record: null });
-  const [dozentenDialog, setDozentenDialog] = useState<{ open: boolean; record: Dozenten | null }>({ open: false, record: null });
-  const [kurseDialog, setKurseDialog] = useState<{ open: boolean; record: Kurse | null }>({ open: false, record: null });
-  const [teilnehmerDialog, setTeilnehmerDialog] = useState<{ open: boolean; record: Teilnehmer | null }>({ open: false, record: null });
-  const [anmeldungenDialog, setAnmeldungenDialog] = useState<{ open: boolean; record: Anmeldungen | null }>({ open: false, record: null });
+  // CRUD dialog states
+  const [raeumeDialog, setRaeumeDialog] = useState<{ open: boolean; record: Raeume | null }>({
+    open: false,
+    record: null,
+  });
+  const [dozentenDialog, setDozentenDialog] = useState<{
+    open: boolean;
+    record: Dozenten | null;
+  }>({ open: false, record: null });
+  const [kurseDialog, setKurseDialog] = useState<{ open: boolean; record: Kurse | null }>({
+    open: false,
+    record: null,
+  });
+  const [teilnehmerDialog, setTeilnehmerDialog] = useState<{
+    open: boolean;
+    record: Teilnehmer | null;
+  }>({ open: false, record: null });
+  const [anmeldungenDialog, setAnmeldungenDialog] = useState<{
+    open: boolean;
+    record: Anmeldungen | null;
+  }>({ open: false, record: null });
 
   // Delete dialog state
-  const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; name: string; onConfirm: () => Promise<void> }>({
-    open: false, name: '', onConfirm: async () => {},
-  });
+  const [deleteDialog, setDeleteDialog] = useState<{
+    open: boolean;
+    name: string;
+    onConfirm: () => Promise<void>;
+  }>({ open: false, name: '', onConfirm: async () => {} });
 
-  // ─── Data Fetching ─────────────────────────────────────────────────
+  // Active tab
+  const [activeTab, setActiveTab] = useState('anmeldungen');
 
-  async function fetchAll() {
+  // ─── Data Fetching ──────────────────────────────────────────────
+
+  const fetchAll = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
@@ -678,355 +979,582 @@ export default function Dashboard() {
         LivingAppsService.getTeilnehmer(),
         LivingAppsService.getAnmeldungen(),
       ]);
-      setRaeume(r); setDozenten(d); setKurse(k); setTeilnehmer(t); setAnmeldungen(a);
+      setRaeume(r);
+      setDozenten(d);
+      setKurse(k);
+      setTeilnehmer(t);
+      setAnmeldungen(a);
     } catch (err) {
       setError(err instanceof Error ? err : new Error('Unbekannter Fehler'));
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
 
-  useEffect(() => { fetchAll(); }, []);
+  useEffect(() => {
+    fetchAll();
+  }, [fetchAll]);
 
-  // Refresh helpers
-  const refreshRaeume = async () => { setRaeume(await LivingAppsService.getRaeume()); };
-  const refreshDozenten = async () => { setDozenten(await LivingAppsService.getDozenten()); };
-  const refreshKurse = async () => { setKurse(await LivingAppsService.getKurse()); };
-  const refreshTeilnehmer = async () => { setTeilnehmer(await LivingAppsService.getTeilnehmer()); };
-  const refreshAnmeldungen = async () => { setAnmeldungen(await LivingAppsService.getAnmeldungen()); };
+  // Individual refresh functions
+  const refreshRaeume = useCallback(async () => {
+    try {
+      setRaeume(await LivingAppsService.getRaeume());
+    } catch {
+      await fetchAll();
+    }
+  }, [fetchAll]);
 
-  // ─── Derived Data ──────────────────────────────────────────────────
+  const refreshDozenten = useCallback(async () => {
+    try {
+      setDozenten(await LivingAppsService.getDozenten());
+    } catch {
+      await fetchAll();
+    }
+  }, [fetchAll]);
 
-  const dozentMap = useMemo(() => {
-    const m = new Map<string, Dozenten>();
-    dozenten.forEach(d => m.set(d.record_id, d));
-    return m;
-  }, [dozenten]);
+  const refreshKurse = useCallback(async () => {
+    try {
+      setKurse(await LivingAppsService.getKurse());
+    } catch {
+      await fetchAll();
+    }
+  }, [fetchAll]);
 
-  const raumMap = useMemo(() => {
-    const m = new Map<string, Raeume>();
-    raeume.forEach(r => m.set(r.record_id, r));
-    return m;
-  }, [raeume]);
+  const refreshTeilnehmer = useCallback(async () => {
+    try {
+      setTeilnehmer(await LivingAppsService.getTeilnehmer());
+    } catch {
+      await fetchAll();
+    }
+  }, [fetchAll]);
 
-  const kursMap = useMemo(() => {
+  const refreshAnmeldungen = useCallback(async () => {
+    try {
+      setAnmeldungen(await LivingAppsService.getAnmeldungen());
+    } catch {
+      await fetchAll();
+    }
+  }, [fetchAll]);
+
+  // ─── Lookup Maps ────────────────────────────────────────────────
+
+  const kurseMap = useMemo(() => {
     const m = new Map<string, Kurse>();
-    kurse.forEach(k => m.set(k.record_id, k));
+    kurse.forEach((k) => m.set(k.record_id, k));
     return m;
   }, [kurse]);
 
   const teilnehmerMap = useMemo(() => {
     const m = new Map<string, Teilnehmer>();
-    teilnehmer.forEach(t => m.set(t.record_id, t));
+    teilnehmer.forEach((t) => m.set(t.record_id, t));
     return m;
   }, [teilnehmer]);
 
-  // Registrations per course
-  const regPerKurs = useMemo(() => {
-    const counts = new Map<string, number>();
-    anmeldungen.forEach(a => {
-      const kId = extractRecordId(a.fields.kurs);
-      if (!kId) return;
-      counts.set(kId, (counts.get(kId) ?? 0) + 1);
-    });
-    return counts;
-  }, [anmeldungen]);
+  const dozentenMap = useMemo(() => {
+    const m = new Map<string, Dozenten>();
+    dozenten.forEach((d) => m.set(d.record_id, d));
+    return m;
+  }, [dozenten]);
 
-  // Stats
+  const raeumeMap = useMemo(() => {
+    const m = new Map<string, Raeume>();
+    raeume.forEach((r) => m.set(r.record_id, r));
+    return m;
+  }, [raeume]);
+
+  // ─── KPIs ───────────────────────────────────────────────────────
+
   const totalAnmeldungen = anmeldungen.length;
-  const bezahlt = anmeldungen.filter(a => a.fields.bezahlt === true).length;
-  const offen = totalAnmeldungen - bezahlt;
+  const unbezahlt = anmeldungen.filter((a) => !a.fields.bezahlt).length;
 
-  // Average utilization
-  const utilization = useMemo(() => {
-    let totalReg = 0;
-    let totalMax = 0;
-    kurse.forEach(k => {
-      const max = k.fields.max_teilnehmer;
-      if (max && max > 0) {
-        const count = regPerKurs.get(k.record_id) ?? 0;
-        totalReg += count;
-        totalMax += max;
-      }
-    });
-    return totalMax > 0 ? Math.round((totalReg / totalMax) * 100) : 0;
-  }, [kurse, regPerKurs]);
+  const today = todayStr();
+  const activeKurse = kurse.filter((k) => {
+    if (!k.fields.enddatum) return true;
+    return k.fields.enddatum.split('T')[0] >= today;
+  }).length;
 
-  // Revenue
-  const gesamtUmsatz = useMemo(() => {
-    let total = 0;
-    anmeldungen.forEach(a => {
-      if (a.fields.bezahlt !== true) return;
-      const kId = extractRecordId(a.fields.kurs);
-      if (!kId) return;
-      const kurs = kursMap.get(kId);
-      total += kurs?.fields.preis ?? 0;
-    });
-    return total;
-  }, [anmeldungen, kursMap]);
+  // ─── Chart Data ─────────────────────────────────────────────────
 
-  // Chart data: registrations per course (top 10)
   const chartData = useMemo(() => {
-    return kurse
-      .map(k => ({
-        name: k.fields.titel ?? 'Unbenannt',
-        count: regPerKurs.get(k.record_id) ?? 0,
-      }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 10);
-  }, [kurse, regPerKurs]);
+    const countByKurs = new Map<string, number>();
+    anmeldungen.forEach((a) => {
+      const kursId = extractRecordId(a.fields.kurs ?? null);
+      if (!kursId) return;
+      countByKurs.set(kursId, (countByKurs.get(kursId) || 0) + 1);
+    });
 
-  // Recent registrations (top 5)
-  const recentAnmeldungen = useMemo(() => {
-    return [...anmeldungen]
-      .sort((a, b) => (b.fields.anmeldedatum ?? b.createdat).localeCompare(a.fields.anmeldedatum ?? a.createdat))
-      .slice(0, 5);
-  }, [anmeldungen]);
+    const data = Array.from(countByKurs.entries())
+      .map(([kursId, count]) => {
+        const kurs = kurseMap.get(kursId);
+        return {
+          name: kurs?.fields.titel ?? 'Unbekannt',
+          anmeldungen: count,
+          maxTeilnehmer: kurs?.fields.max_teilnehmer ?? 0,
+        };
+      })
+      .sort((a, b) => b.anmeldungen - a.anmeldungen);
 
-  // ─── Delete handlers ───────────────────────────────────────────────
+    return isMobile ? data.slice(0, 5) : data;
+  }, [anmeldungen, kurseMap, isMobile]);
 
-  function confirmDeleteRaum(r: Raeume) {
-    setDeleteDialog({
-      open: true,
-      name: `Raum "${r.fields.raumname ?? 'Unbenannt'}"`,
-      onConfirm: async () => { await LivingAppsService.deleteRaeumeEntry(r.record_id); await refreshRaeume(); },
+  // ─── Recent Activity ────────────────────────────────────────────
+
+  const recentActivity = useMemo(() => {
+    type ActivityItem = { label: string; date: string; type: string };
+    const items: ActivityItem[] = [];
+
+    anmeldungen.forEach((a) => {
+      const tnId = extractRecordId(a.fields.teilnehmer ?? null);
+      const kursId = extractRecordId(a.fields.kurs ?? null);
+      const tn = tnId ? teilnehmerMap.get(tnId) : null;
+      const k = kursId ? kurseMap.get(kursId) : null;
+      items.push({
+        label: `${tn?.fields.teilnehmer_firstname ?? '?'} ${tn?.fields.teilnehmer_lastname ?? ''} → ${k?.fields.titel ?? 'Kurs'}`,
+        date: a.createdat,
+        type: 'Anmeldung',
+      });
     });
-  }
-  function confirmDeleteDozent(d: Dozenten) {
-    setDeleteDialog({
-      open: true,
-      name: `Dozent "${d.fields.dozent_firstname ?? ''} ${d.fields.dozent_lastname ?? ''}"`,
-      onConfirm: async () => { await LivingAppsService.deleteDozentenEntry(d.record_id); await refreshDozenten(); },
+
+    kurse.forEach((k) => {
+      items.push({
+        label: k.fields.titel ?? 'Kurs',
+        date: k.createdat,
+        type: 'Kurs',
+      });
     });
-  }
-  function confirmDeleteKurs(k: Kurse) {
+
+    return items.sort((a, b) => b.date.localeCompare(a.date)).slice(0, 5);
+  }, [anmeldungen, kurse, teilnehmerMap, kurseMap]);
+
+  // ─── Delete Handlers ────────────────────────────────────────────
+
+  function handleDeleteRaum(r: Raeume) {
     setDeleteDialog({
       open: true,
-      name: `Kurs "${k.fields.titel ?? 'Unbenannt'}"`,
-      onConfirm: async () => { await LivingAppsService.deleteKurseEntry(k.record_id); await refreshKurse(); },
-    });
-  }
-  function confirmDeleteTeilnehmer(t: Teilnehmer) {
-    setDeleteDialog({
-      open: true,
-      name: `Teilnehmer "${t.fields.teilnehmer_firstname ?? ''} ${t.fields.teilnehmer_lastname ?? ''}"`,
-      onConfirm: async () => { await LivingAppsService.deleteTeilnehmerEntry(t.record_id); await refreshTeilnehmer(); },
-    });
-  }
-  function confirmDeleteAnmeldung(a: Anmeldungen) {
-    const tId = extractRecordId(a.fields.teilnehmer);
-    const kId = extractRecordId(a.fields.kurs);
-    const tName = tId ? `${teilnehmerMap.get(tId)?.fields.teilnehmer_firstname ?? ''} ${teilnehmerMap.get(tId)?.fields.teilnehmer_lastname ?? ''}`.trim() : 'Unbekannt';
-    const kName = kId ? kursMap.get(kId)?.fields.titel ?? 'Unbekannt' : 'Unbekannt';
-    setDeleteDialog({
-      open: true,
-      name: `Anmeldung von "${tName}" für "${kName}"`,
-      onConfirm: async () => { await LivingAppsService.deleteAnmeldungenEntry(a.record_id); await refreshAnmeldungen(); },
+      name: r.fields.raumname ?? 'Raum',
+      onConfirm: async () => {
+        await LivingAppsService.deleteRaeumeEntry(r.record_id);
+        await refreshRaeume();
+      },
     });
   }
 
-  // ─── Render ────────────────────────────────────────────────────────
+  function handleDeleteDozent(d: Dozenten) {
+    setDeleteDialog({
+      open: true,
+      name: `${d.fields.dozent_firstname ?? ''} ${d.fields.dozent_lastname ?? ''}`.trim() || 'Dozent',
+      onConfirm: async () => {
+        await LivingAppsService.deleteDozentenEntry(d.record_id);
+        await refreshDozenten();
+      },
+    });
+  }
+
+  function handleDeleteKurs(k: Kurse) {
+    setDeleteDialog({
+      open: true,
+      name: k.fields.titel ?? 'Kurs',
+      onConfirm: async () => {
+        await LivingAppsService.deleteKurseEntry(k.record_id);
+        await refreshKurse();
+      },
+    });
+  }
+
+  function handleDeleteTeilnehmer(t: Teilnehmer) {
+    setDeleteDialog({
+      open: true,
+      name:
+        `${t.fields.teilnehmer_firstname ?? ''} ${t.fields.teilnehmer_lastname ?? ''}`.trim() ||
+        'Teilnehmer',
+      onConfirm: async () => {
+        await LivingAppsService.deleteTeilnehmerEntry(t.record_id);
+        await refreshTeilnehmer();
+      },
+    });
+  }
+
+  function handleDeleteAnmeldung(a: Anmeldungen) {
+    const tnId = extractRecordId(a.fields.teilnehmer ?? null);
+    const tn = tnId ? teilnehmerMap.get(tnId) : null;
+    setDeleteDialog({
+      open: true,
+      name: tn
+        ? `Anmeldung von ${tn.fields.teilnehmer_firstname} ${tn.fields.teilnehmer_lastname}`
+        : 'Anmeldung',
+      onConfirm: async () => {
+        await LivingAppsService.deleteAnmeldungenEntry(a.record_id);
+        await refreshAnmeldungen();
+      },
+    });
+  }
+
+  // ─── Render ─────────────────────────────────────────────────────
 
   if (loading) return <LoadingState />;
   if (error) return <ErrorState error={error} onRetry={fetchAll} />;
 
+  // Sort data for tables
+  const sortedAnmeldungen = [...anmeldungen].sort((a, b) =>
+    (b.fields.anmeldedatum ?? b.createdat).localeCompare(a.fields.anmeldedatum ?? a.createdat),
+  );
+  const sortedKurse = [...kurse].sort((a, b) =>
+    (b.fields.startdatum ?? b.createdat).localeCompare(a.fields.startdatum ?? a.createdat),
+  );
+  const sortedTeilnehmer = [...teilnehmer].sort((a, b) =>
+    (a.fields.teilnehmer_lastname ?? '').localeCompare(b.fields.teilnehmer_lastname ?? ''),
+  );
+  const sortedDozenten = [...dozenten].sort((a, b) =>
+    (a.fields.dozent_lastname ?? '').localeCompare(b.fields.dozent_lastname ?? ''),
+  );
+  const sortedRaeume = [...raeume].sort((a, b) =>
+    (a.fields.raumname ?? '').localeCompare(b.fields.raumname ?? ''),
+  );
+
   return (
-    <div className="min-h-screen bg-background animate-in fade-in duration-300">
+    <div className="min-h-screen bg-background">
       {/* ─── Header ─────────────────────────────────────────────── */}
-      <header className="sticky top-0 z-30 bg-background/80 backdrop-blur-sm border-b border-border">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
-          <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Kursverwaltung</h1>
-          <Button onClick={() => setAnmeldungenDialog({ open: true, record: null })} className="hidden sm:flex">
-            <Plus className="h-4 w-4 mr-2" /> Neue Anmeldung
+      <header className="sticky top-0 z-30 bg-background/95 backdrop-blur border-b border-border">
+        <div className="max-w-[1400px] mx-auto px-4 md:px-8 py-4 flex items-center justify-between">
+          <h1 className="text-xl md:text-2xl font-bold tracking-tight">Kursverwaltung</h1>
+          <Button
+            onClick={() => setAnmeldungenDialog({ open: true, record: null })}
+            className="shadow-sm"
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            {isMobile ? '' : 'Neue Anmeldung'}
           </Button>
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
-        {/* ─── Hero + Stats Row ──────────────────────────────────── */}
-        <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+      <main className="max-w-[1400px] mx-auto px-4 md:px-8 py-6 space-y-6 pb-24 md:pb-6">
+        {/* ─── KPIs Row ───────────────────────────────────────────── */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           {/* Hero KPI */}
-          <Card className="lg:col-span-3 shadow-sm hover:shadow-md transition-shadow">
-            <CardContent className="pt-6 flex flex-col items-center text-center space-y-3">
-              <div className="relative">
-                <ProgressRing percent={utilization} size={160} stroke={6} />
-                <div className="absolute inset-0 flex flex-col items-center justify-center">
-                  <span className="text-4xl sm:text-5xl font-extrabold tracking-tight">{totalAnmeldungen}</span>
-                  <span className="text-sm font-medium text-muted-foreground">Anmeldungen</span>
-                </div>
-              </div>
-              <p className="text-xs text-muted-foreground">{utilization}% Kursauslastung</p>
-              <div className="flex gap-3">
-                <Badge className="bg-[hsl(152_50%_38%)] text-white border-0">{bezahlt} bezahlt</Badge>
-                <Badge className="bg-[hsl(40_70%_55%)] text-white border-0">{offen} offen</Badge>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Secondary Stats */}
-          <div className="lg:col-span-2 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-1 gap-3">
-            {[
-              { label: 'Aktive Kurse', value: kurse.length, icon: BookOpen },
-              { label: 'Dozenten', value: dozenten.length, icon: GraduationCap },
-              { label: 'Räume', value: raeume.length, icon: DoorOpen },
-              { label: 'Teilnehmer', value: teilnehmer.length, icon: Users },
-              { label: 'Gesamtumsatz', value: formatCurrency(gesamtUmsatz), icon: Euro },
-            ].map(s => (
-              <Card key={s.label} className="shadow-sm hover:shadow-md transition-shadow">
-                <CardContent className="py-3 px-4 flex items-center justify-between">
-                  <div>
-                    <p className="text-xs text-muted-foreground font-medium">{s.label}</p>
-                    <p className="text-lg font-bold tracking-tight">{s.value}</p>
-                  </div>
-                  <s.icon className="h-5 w-5 text-muted-foreground" />
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </div>
-
-        {/* ─── Chart + Recent Registrations ──────────────────────── */}
-        <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-          {/* Chart */}
-          <Card className="lg:col-span-3 shadow-sm">
+          <Card
+            className="border-l-4 border-l-primary cursor-pointer hover:shadow-md transition-shadow"
+            onClick={() => setActiveTab('anmeldungen')}
+          >
             <CardHeader className="pb-2">
-              <CardTitle className="text-base font-semibold">Anmeldungen pro Kurs</CardTitle>
+              <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                <ClipboardList className="h-4 w-4" />
+                Aktive Anmeldungen
+              </CardTitle>
             </CardHeader>
             <CardContent>
-              {chartData.length === 0 ? (
-                <p className="text-sm text-muted-foreground py-8 text-center">Noch keine Kurse vorhanden.</p>
-              ) : (
-                <div className="h-[300px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={chartData} layout="vertical" margin={{ left: 0, right: 16, top: 8, bottom: 8 }}>
-                      <XAxis type="number" tick={{ fontSize: 12 }} stroke="hsl(210 10% 50%)" allowDecimals={false} />
-                      <YAxis type="category" dataKey="name" tick={{ fontSize: 12 }} stroke="hsl(210 10% 50%)" width={120} />
-                      <Tooltip
-                        contentStyle={{ backgroundColor: 'hsl(0 0% 100%)', border: '1px solid hsl(40 15% 90%)', borderRadius: '8px' }}
-                        formatter={(value: number) => [`${value} Anmeldungen`, '']}
-                      />
-                      <Bar dataKey="count" radius={[0, 4, 4, 0]} maxBarSize={28}>
-                        {chartData.map((_, i) => (
-                          <Cell key={i} fill={`hsl(178 45% ${30 + i * 4}%)`} />
-                        ))}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              )}
+              <div className="text-5xl font-bold tracking-tight">{totalAnmeldungen}</div>
+              <div className="mt-2">
+                {unbezahlt > 0 ? (
+                  <Badge
+                    variant="secondary"
+                    className="text-xs"
+                    style={{ backgroundColor: 'hsl(38 92% 50% / 0.15)', color: 'hsl(38 70% 35%)' }}
+                  >
+                    {unbezahlt} offen
+                  </Badge>
+                ) : (
+                  <Badge
+                    variant="secondary"
+                    className="text-xs"
+                    style={{
+                      backgroundColor: 'hsl(152 55% 42% / 0.15)',
+                      color: 'hsl(152 55% 32%)',
+                    }}
+                  >
+                    Alle bezahlt
+                  </Badge>
+                )}
+              </div>
             </CardContent>
           </Card>
 
-          {/* Recent Registrations */}
-          <Card className="lg:col-span-2 shadow-sm">
+          {/* Secondary KPIs */}
+          <Card
+            className="cursor-pointer hover:shadow-md transition-shadow"
+            onClick={() => setActiveTab('kurse')}
+          >
             <CardHeader className="pb-2">
-              <CardTitle className="text-base font-semibold">Letzte Anmeldungen</CardTitle>
+              <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                <BookOpen className="h-4 w-4" />
+                Aktive Kurse
+              </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-3">
-              {recentAnmeldungen.length === 0 ? (
-                <p className="text-sm text-muted-foreground py-4 text-center">Noch keine Anmeldungen.</p>
-              ) : (
-                recentAnmeldungen.map(a => {
-                  const tId = extractRecordId(a.fields.teilnehmer);
-                  const kId = extractRecordId(a.fields.kurs);
-                  const t = tId ? teilnehmerMap.get(tId) : null;
-                  const k = kId ? kursMap.get(kId) : null;
-                  return (
-                    <div key={a.record_id}
-                      className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted cursor-pointer transition-colors"
-                      onClick={() => setAnmeldungenDialog({ open: true, record: a })}>
-                      <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${a.fields.bezahlt ? 'bg-[hsl(152_50%_38%)]' : 'bg-[hsl(40_70%_55%)]'}`} />
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium truncate">
-                          {t ? `${t.fields.teilnehmer_firstname ?? ''} ${t.fields.teilnehmer_lastname ?? ''}`.trim() : 'Unbekannt'}
-                        </p>
-                        <p className="text-xs text-muted-foreground truncate">{k?.fields.titel ?? 'Unbekannt'}</p>
-                      </div>
-                      <span className="text-xs text-muted-foreground whitespace-nowrap">
-                        {relativeDate(a.fields.anmeldedatum ?? a.createdat)}
-                      </span>
-                    </div>
-                  );
-                })
-              )}
+            <CardContent>
+              <div className="text-3xl font-semibold">{activeKurse}</div>
+            </CardContent>
+          </Card>
+
+          <Card
+            className="cursor-pointer hover:shadow-md transition-shadow"
+            onClick={() => setActiveTab('teilnehmer')}
+          >
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                <Users className="h-4 w-4" />
+                Teilnehmer
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-3xl font-semibold">{teilnehmer.length}</div>
+            </CardContent>
+          </Card>
+
+          <Card
+            className="cursor-pointer hover:shadow-md transition-shadow"
+            onClick={() => setActiveTab('dozenten')}
+          >
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                <GraduationCap className="h-4 w-4" />
+                Dozenten
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-3xl font-semibold">{dozenten.length}</div>
             </CardContent>
           </Card>
         </div>
 
-        {/* ─── Data Management Tabs ──────────────────────────────── */}
-        <Tabs defaultValue="kurse" className="space-y-4">
-          <TabsList className="w-full flex overflow-x-auto">
-            <TabsTrigger value="kurse">Kurse</TabsTrigger>
-            <TabsTrigger value="dozenten">Dozenten</TabsTrigger>
-            <TabsTrigger value="raeume">Räume</TabsTrigger>
-            <TabsTrigger value="teilnehmer">Teilnehmer</TabsTrigger>
-            <TabsTrigger value="anmeldungen">Anmeldungen</TabsTrigger>
-          </TabsList>
+        {/* ─── Content Area ───────────────────────────────────────── */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Left column: Chart + Tabbed Data */}
+          <div className="lg:col-span-2 space-y-6">
+            {/* Chart */}
+            {chartData.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base font-semibold">
+                    Anmeldungen pro Kurs
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="h-[300px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart
+                        data={chartData}
+                        layout="vertical"
+                        margin={{ top: 0, right: 20, bottom: 0, left: 0 }}
+                      >
+                        <XAxis type="number" allowDecimals={false} tick={{ fontSize: 12 }} />
+                        <YAxis
+                          type="category"
+                          dataKey="name"
+                          width={isMobile ? 100 : 160}
+                          tick={{ fontSize: 12 }}
+                        />
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: 'hsl(0 0% 100%)',
+                            border: '1px solid hsl(220 15% 90%)',
+                            borderRadius: '8px',
+                            fontSize: '13px',
+                          }}
+                          formatter={(value: number, name: string) => {
+                            if (name === 'maxTeilnehmer') return [value, 'Max. Plaetze'];
+                            return [value, 'Anmeldungen'];
+                          }}
+                        />
+                        <Bar dataKey="maxTeilnehmer" fill="hsl(220 45% 65% / 0.25)" radius={[0, 4, 4, 0]} />
+                        <Bar dataKey="anmeldungen" radius={[0, 4, 4, 0]}>
+                          {chartData.map((entry, index) => (
+                            <Cell
+                              key={index}
+                              fill={
+                                entry.maxTeilnehmer > 0 &&
+                                entry.anmeldungen >= entry.maxTeilnehmer
+                                  ? 'hsl(38 92% 50%)'
+                                  : 'hsl(220 65% 38%)'
+                              }
+                            />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
 
-          {/* ── Kurse Tab ────────────────────────────────────────── */}
-          <TabsContent value="kurse">
-            <Card className="shadow-sm">
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-base font-semibold">Kurse</CardTitle>
-                <Button size="sm" onClick={() => setKurseDialog({ open: true, record: null })}>
-                  <Plus className="h-4 w-4 mr-1" /> Neu
-                </Button>
-              </CardHeader>
-              <CardContent>
-                {kurse.length === 0 ? (
-                  <div className="text-center py-8 space-y-3">
-                    <p className="text-sm text-muted-foreground">Noch keine Kurse vorhanden.</p>
-                    <Button variant="outline" onClick={() => setKurseDialog({ open: true, record: null })}>
-                      <Plus className="h-4 w-4 mr-1" /> Ersten Kurs erstellen
-                    </Button>
+            {/* Tabbed Data Management */}
+            <Tabs value={activeTab} onValueChange={setActiveTab}>
+              <TabsList className="w-full flex">
+                <TabsTrigger value="anmeldungen" className="flex-1 text-xs md:text-sm">
+                  <ClipboardList className="h-4 w-4 mr-1 hidden md:inline" />
+                  Anmeldungen
+                </TabsTrigger>
+                <TabsTrigger value="kurse" className="flex-1 text-xs md:text-sm">
+                  <BookOpen className="h-4 w-4 mr-1 hidden md:inline" />
+                  Kurse
+                </TabsTrigger>
+                <TabsTrigger value="teilnehmer" className="flex-1 text-xs md:text-sm">
+                  <Users className="h-4 w-4 mr-1 hidden md:inline" />
+                  Teilnehmer
+                </TabsTrigger>
+                <TabsTrigger value="dozenten" className="flex-1 text-xs md:text-sm">
+                  <GraduationCap className="h-4 w-4 mr-1 hidden md:inline" />
+                  Dozenten
+                </TabsTrigger>
+                <TabsTrigger value="raeume" className="flex-1 text-xs md:text-sm">
+                  <DoorOpen className="h-4 w-4 mr-1 hidden md:inline" />
+                  Raeume
+                </TabsTrigger>
+              </TabsList>
+
+              {/* ── Anmeldungen Tab ─────────────────────────────────── */}
+              <TabsContent value="anmeldungen" className="mt-4">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-sm font-medium text-muted-foreground">
+                    {anmeldungen.length} Anmeldungen
+                  </h3>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setAnmeldungenDialog({ open: true, record: null })}
+                  >
+                    <Plus className="h-4 w-4 mr-1" /> Neu
+                  </Button>
+                </div>
+                {anmeldungen.length === 0 ? (
+                  <EmptyTabState
+                    label="Anmeldungen"
+                    onAdd={() => setAnmeldungenDialog({ open: true, record: null })}
+                  />
+                ) : isMobile ? (
+                  <div className="space-y-2">
+                    {sortedAnmeldungen.map((a) => {
+                      const tnId = extractRecordId(a.fields.teilnehmer ?? null);
+                      const kursId = extractRecordId(a.fields.kurs ?? null);
+                      const tn = tnId ? teilnehmerMap.get(tnId) : null;
+                      const k = kursId ? kurseMap.get(kursId) : null;
+                      return (
+                        <div
+                          key={a.record_id}
+                          className="flex items-center justify-between p-3 rounded-lg border bg-card hover:bg-muted/50 transition-colors"
+                        >
+                          <div
+                            className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer"
+                            onClick={() => setAnmeldungenDialog({ open: true, record: a })}
+                          >
+                            <span
+                              className="w-2 h-2 rounded-full shrink-0"
+                              style={{
+                                backgroundColor: a.fields.bezahlt
+                                  ? 'hsl(152 55% 42%)'
+                                  : 'hsl(38 92% 50%)',
+                              }}
+                            />
+                            <div className="min-w-0">
+                              <div className="font-medium text-sm truncate">
+                                {tn
+                                  ? `${tn.fields.teilnehmer_firstname} ${tn.fields.teilnehmer_lastname}`
+                                  : '-'}
+                              </div>
+                              <div className="text-xs text-muted-foreground truncate">
+                                {k?.fields.titel ?? '-'} · {formatDate(a.fields.anmeldedatum)}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex gap-1 shrink-0">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              onClick={() => setAnmeldungenDialog({ open: true, record: a })}
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-destructive hover:text-destructive"
+                              onClick={() => handleDeleteAnmeldung(a)}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 ) : (
-                  <div className="overflow-x-auto">
+                  <div className="border rounded-lg overflow-hidden">
                     <Table>
                       <TableHeader>
                         <TableRow>
-                          <TableHead>Kurstitel</TableHead>
-                          <TableHead className="hidden sm:table-cell">Dozent</TableHead>
-                          <TableHead className="hidden md:table-cell">Zeitraum</TableHead>
-                          <TableHead>Plätze</TableHead>
-                          <TableHead className="hidden sm:table-cell">Preis</TableHead>
-                          <TableHead className="w-[80px]" />
+                          <TableHead className="w-8"></TableHead>
+                          <TableHead>Teilnehmer</TableHead>
+                          <TableHead>Kurs</TableHead>
+                          <TableHead>Anmeldedatum</TableHead>
+                          <TableHead>Status</TableHead>
+                          <TableHead className="w-20"></TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {kurse.map(k => {
-                          const dId = extractRecordId(k.fields.dozent);
-                          const doz = dId ? dozentMap.get(dId) : null;
-                          const regs = regPerKurs.get(k.record_id) ?? 0;
-                          const max = k.fields.max_teilnehmer ?? 0;
-                          const fillPct = max > 0 ? Math.min((regs / max) * 100, 100) : 0;
+                        {sortedAnmeldungen.map((a) => {
+                          const tnId = extractRecordId(a.fields.teilnehmer ?? null);
+                          const kursId = extractRecordId(a.fields.kurs ?? null);
+                          const tn = tnId ? teilnehmerMap.get(tnId) : null;
+                          const k = kursId ? kurseMap.get(kursId) : null;
                           return (
-                            <TableRow key={k.record_id} className="group hover:bg-muted/50 cursor-pointer"
-                              onClick={() => setKurseDialog({ open: true, record: k })}>
-                              <TableCell className="font-medium">{k.fields.titel ?? '–'}</TableCell>
-                              <TableCell className="hidden sm:table-cell text-muted-foreground">
-                                {doz ? `${doz.fields.dozent_firstname ?? ''} ${doz.fields.dozent_lastname ?? ''}`.trim() : '–'}
+                            <TableRow
+                              key={a.record_id}
+                              className="cursor-pointer hover:bg-muted/50"
+                              onClick={() => setAnmeldungenDialog({ open: true, record: a })}
+                            >
+                              <TableCell>
+                                <span
+                                  className="w-2 h-2 rounded-full inline-block"
+                                  style={{
+                                    backgroundColor: a.fields.bezahlt
+                                      ? 'hsl(152 55% 42%)'
+                                      : 'hsl(38 92% 50%)',
+                                  }}
+                                />
                               </TableCell>
-                              <TableCell className="hidden md:table-cell text-muted-foreground text-sm">
-                                {k.fields.startdatum ? formatDate(k.fields.startdatum) : '–'} – {k.fields.enddatum ? formatDate(k.fields.enddatum) : '–'}
+                              <TableCell className="font-medium">
+                                {tn
+                                  ? `${tn.fields.teilnehmer_firstname} ${tn.fields.teilnehmer_lastname}`
+                                  : '-'}
+                              </TableCell>
+                              <TableCell>{k?.fields.titel ?? '-'}</TableCell>
+                              <TableCell>{formatDate(a.fields.anmeldedatum)}</TableCell>
+                              <TableCell>
+                                <Badge
+                                  variant="secondary"
+                                  className="text-xs"
+                                  style={
+                                    a.fields.bezahlt
+                                      ? {
+                                          backgroundColor: 'hsl(152 55% 42% / 0.15)',
+                                          color: 'hsl(152 55% 32%)',
+                                        }
+                                      : {
+                                          backgroundColor: 'hsl(38 92% 50% / 0.15)',
+                                          color: 'hsl(38 70% 35%)',
+                                        }
+                                  }
+                                >
+                                  {a.fields.bezahlt ? 'Bezahlt' : 'Offen'}
+                                </Badge>
                               </TableCell>
                               <TableCell>
-                                <div className="flex items-center gap-2">
-                                  <div className="w-16 h-1.5 bg-muted rounded-full overflow-hidden">
-                                    <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${fillPct}%` }} />
-                                  </div>
-                                  <span className="text-xs text-muted-foreground">{regs}/{max || '∞'}</span>
-                                </div>
-                              </TableCell>
-                              <TableCell className="hidden sm:table-cell text-muted-foreground">{formatCurrency(k.fields.preis)}</TableCell>
-                              <TableCell>
-                                <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                  <Button variant="ghost" size="icon" className="h-8 w-8"
-                                    onClick={e => { e.stopPropagation(); setKurseDialog({ open: true, record: k }); }}>
+                                <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-8 w-8"
+                                    onClick={() =>
+                                      setAnmeldungenDialog({ open: true, record: a })
+                                    }
+                                  >
                                     <Pencil className="h-3.5 w-3.5" />
                                   </Button>
-                                  <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive"
-                                    onClick={e => { e.stopPropagation(); confirmDeleteKurs(k); }}>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-8 w-8 text-destructive hover:text-destructive"
+                                    onClick={() => handleDeleteAnmeldung(a)}
+                                  >
                                     <Trash2 className="h-3.5 w-3.5" />
                                   </Button>
                                 </div>
@@ -1038,55 +1566,245 @@ export default function Dashboard() {
                     </Table>
                   </div>
                 )}
-              </CardContent>
-            </Card>
-          </TabsContent>
+              </TabsContent>
 
-          {/* ── Dozenten Tab ─────────────────────────────────────── */}
-          <TabsContent value="dozenten">
-            <Card className="shadow-sm">
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-base font-semibold">Dozenten</CardTitle>
-                <Button size="sm" onClick={() => setDozentenDialog({ open: true, record: null })}>
-                  <Plus className="h-4 w-4 mr-1" /> Neu
-                </Button>
-              </CardHeader>
-              <CardContent>
-                {dozenten.length === 0 ? (
-                  <div className="text-center py-8 space-y-3">
-                    <p className="text-sm text-muted-foreground">Noch keine Dozenten vorhanden.</p>
-                    <Button variant="outline" onClick={() => setDozentenDialog({ open: true, record: null })}>
-                      <Plus className="h-4 w-4 mr-1" /> Ersten Dozenten hinzufügen
-                    </Button>
+              {/* ── Kurse Tab ───────────────────────────────────────── */}
+              <TabsContent value="kurse" className="mt-4">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-sm font-medium text-muted-foreground">
+                    {kurse.length} Kurse
+                  </h3>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setKurseDialog({ open: true, record: null })}
+                  >
+                    <Plus className="h-4 w-4 mr-1" /> Neu
+                  </Button>
+                </div>
+                {kurse.length === 0 ? (
+                  <EmptyTabState
+                    label="Kurse"
+                    onAdd={() => setKurseDialog({ open: true, record: null })}
+                  />
+                ) : isMobile ? (
+                  <div className="space-y-2">
+                    {sortedKurse.map((k) => {
+                      const dozentId = extractRecordId(k.fields.dozent ?? null);
+                      const doz = dozentId ? dozentenMap.get(dozentId) : null;
+                      return (
+                        <div
+                          key={k.record_id}
+                          className="flex items-center justify-between p-3 rounded-lg border bg-card hover:bg-muted/50 transition-colors"
+                        >
+                          <div
+                            className="flex-1 min-w-0 cursor-pointer"
+                            onClick={() => setKurseDialog({ open: true, record: k })}
+                          >
+                            <div className="font-medium text-sm truncate">
+                              {k.fields.titel ?? '-'}
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                              {formatDate(k.fields.startdatum)} - {formatDate(k.fields.enddatum)}
+                              {doz
+                                ? ` · ${doz.fields.dozent_firstname} ${doz.fields.dozent_lastname}`
+                                : ''}
+                            </div>
+                          </div>
+                          <div className="flex gap-1 shrink-0">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              onClick={() => setKurseDialog({ open: true, record: k })}
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-destructive hover:text-destructive"
+                              onClick={() => handleDeleteKurs(k)}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 ) : (
-                  <div className="overflow-x-auto">
+                  <div className="border rounded-lg overflow-hidden">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Kurstitel</TableHead>
+                          <TableHead>Start</TableHead>
+                          <TableHead>Ende</TableHead>
+                          <TableHead>Max. TN</TableHead>
+                          <TableHead>Preis</TableHead>
+                          <TableHead>Dozent</TableHead>
+                          <TableHead>Raum</TableHead>
+                          <TableHead className="w-20"></TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {sortedKurse.map((k) => {
+                          const dozentId = extractRecordId(k.fields.dozent ?? null);
+                          const raumId = extractRecordId(k.fields.raum ?? null);
+                          const doz = dozentId ? dozentenMap.get(dozentId) : null;
+                          const raum = raumId ? raeumeMap.get(raumId) : null;
+                          return (
+                            <TableRow
+                              key={k.record_id}
+                              className="cursor-pointer hover:bg-muted/50"
+                              onClick={() => setKurseDialog({ open: true, record: k })}
+                            >
+                              <TableCell className="font-medium">
+                                {k.fields.titel ?? '-'}
+                              </TableCell>
+                              <TableCell>{formatDate(k.fields.startdatum)}</TableCell>
+                              <TableCell>{formatDate(k.fields.enddatum)}</TableCell>
+                              <TableCell>{k.fields.max_teilnehmer ?? '-'}</TableCell>
+                              <TableCell>{formatCurrency(k.fields.preis)}</TableCell>
+                              <TableCell>
+                                {doz
+                                  ? `${doz.fields.dozent_firstname} ${doz.fields.dozent_lastname}`
+                                  : '-'}
+                              </TableCell>
+                              <TableCell>{raum?.fields.raumname ?? '-'}</TableCell>
+                              <TableCell>
+                                <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-8 w-8"
+                                    onClick={() => setKurseDialog({ open: true, record: k })}
+                                  >
+                                    <Pencil className="h-3.5 w-3.5" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-8 w-8 text-destructive hover:text-destructive"
+                                    onClick={() => handleDeleteKurs(k)}
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </TabsContent>
+
+              {/* ── Teilnehmer Tab ──────────────────────────────────── */}
+              <TabsContent value="teilnehmer" className="mt-4">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-sm font-medium text-muted-foreground">
+                    {teilnehmer.length} Teilnehmer
+                  </h3>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setTeilnehmerDialog({ open: true, record: null })}
+                  >
+                    <Plus className="h-4 w-4 mr-1" /> Neu
+                  </Button>
+                </div>
+                {teilnehmer.length === 0 ? (
+                  <EmptyTabState
+                    label="Teilnehmer"
+                    onAdd={() => setTeilnehmerDialog({ open: true, record: null })}
+                  />
+                ) : isMobile ? (
+                  <div className="space-y-2">
+                    {sortedTeilnehmer.map((t) => (
+                      <div
+                        key={t.record_id}
+                        className="flex items-center justify-between p-3 rounded-lg border bg-card hover:bg-muted/50 transition-colors"
+                      >
+                        <div
+                          className="flex-1 min-w-0 cursor-pointer"
+                          onClick={() => setTeilnehmerDialog({ open: true, record: t })}
+                        >
+                          <div className="font-medium text-sm truncate">
+                            {t.fields.teilnehmer_firstname} {t.fields.teilnehmer_lastname}
+                          </div>
+                          <div className="text-xs text-muted-foreground truncate">
+                            {t.fields.email ?? ''}
+                          </div>
+                        </div>
+                        <div className="flex gap-1 shrink-0">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={() => setTeilnehmerDialog({ open: true, record: t })}
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-destructive hover:text-destructive"
+                            onClick={() => handleDeleteTeilnehmer(t)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="border rounded-lg overflow-hidden">
                     <Table>
                       <TableHeader>
                         <TableRow>
                           <TableHead>Vorname</TableHead>
                           <TableHead>Nachname</TableHead>
-                          <TableHead className="hidden sm:table-cell">E-Mail</TableHead>
-                          <TableHead className="hidden md:table-cell">Fachgebiet</TableHead>
-                          <TableHead className="w-[80px]" />
+                          <TableHead>E-Mail</TableHead>
+                          <TableHead>Telefon</TableHead>
+                          <TableHead>Geburtsdatum</TableHead>
+                          <TableHead className="w-20"></TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {dozenten.map(d => (
-                          <TableRow key={d.record_id} className="group hover:bg-muted/50 cursor-pointer"
-                            onClick={() => setDozentenDialog({ open: true, record: d })}>
-                            <TableCell className="font-medium">{d.fields.dozent_firstname ?? '–'}</TableCell>
-                            <TableCell>{d.fields.dozent_lastname ?? '–'}</TableCell>
-                            <TableCell className="hidden sm:table-cell text-muted-foreground">{d.fields.email ?? '–'}</TableCell>
-                            <TableCell className="hidden md:table-cell text-muted-foreground">{d.fields.fachgebiet ?? '–'}</TableCell>
+                        {sortedTeilnehmer.map((t) => (
+                          <TableRow
+                            key={t.record_id}
+                            className="cursor-pointer hover:bg-muted/50"
+                            onClick={() => setTeilnehmerDialog({ open: true, record: t })}
+                          >
+                            <TableCell className="font-medium">
+                              {t.fields.teilnehmer_firstname ?? '-'}
+                            </TableCell>
+                            <TableCell>{t.fields.teilnehmer_lastname ?? '-'}</TableCell>
+                            <TableCell>{t.fields.email ?? '-'}</TableCell>
+                            <TableCell>{t.fields.telefon ?? '-'}</TableCell>
+                            <TableCell>{formatDate(t.fields.geburtsdatum)}</TableCell>
                             <TableCell>
-                              <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <Button variant="ghost" size="icon" className="h-8 w-8"
-                                  onClick={e => { e.stopPropagation(); setDozentenDialog({ open: true, record: d }); }}>
+                              <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8"
+                                  onClick={() =>
+                                    setTeilnehmerDialog({ open: true, record: t })
+                                  }
+                                >
                                   <Pencil className="h-3.5 w-3.5" />
                                 </Button>
-                                <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive"
-                                  onClick={e => { e.stopPropagation(); confirmDeleteDozent(d); }}>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 text-destructive hover:text-destructive"
+                                  onClick={() => handleDeleteTeilnehmer(t)}
+                                >
                                   <Trash2 className="h-3.5 w-3.5" />
                                 </Button>
                               </div>
@@ -1097,53 +1815,222 @@ export default function Dashboard() {
                     </Table>
                   </div>
                 )}
-              </CardContent>
-            </Card>
-          </TabsContent>
+              </TabsContent>
 
-          {/* ── Räume Tab ────────────────────────────────────────── */}
-          <TabsContent value="raeume">
-            <Card className="shadow-sm">
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-base font-semibold">Räume</CardTitle>
-                <Button size="sm" onClick={() => setRaeumeDialog({ open: true, record: null })}>
-                  <Plus className="h-4 w-4 mr-1" /> Neu
-                </Button>
-              </CardHeader>
-              <CardContent>
-                {raeume.length === 0 ? (
-                  <div className="text-center py-8 space-y-3">
-                    <p className="text-sm text-muted-foreground">Noch keine Räume vorhanden.</p>
-                    <Button variant="outline" onClick={() => setRaeumeDialog({ open: true, record: null })}>
-                      <Plus className="h-4 w-4 mr-1" /> Ersten Raum hinzufügen
-                    </Button>
+              {/* ── Dozenten Tab ────────────────────────────────────── */}
+              <TabsContent value="dozenten" className="mt-4">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-sm font-medium text-muted-foreground">
+                    {dozenten.length} Dozenten
+                  </h3>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setDozentenDialog({ open: true, record: null })}
+                  >
+                    <Plus className="h-4 w-4 mr-1" /> Neu
+                  </Button>
+                </div>
+                {dozenten.length === 0 ? (
+                  <EmptyTabState
+                    label="Dozenten"
+                    onAdd={() => setDozentenDialog({ open: true, record: null })}
+                  />
+                ) : isMobile ? (
+                  <div className="space-y-2">
+                    {sortedDozenten.map((d) => (
+                      <div
+                        key={d.record_id}
+                        className="flex items-center justify-between p-3 rounded-lg border bg-card hover:bg-muted/50 transition-colors"
+                      >
+                        <div
+                          className="flex-1 min-w-0 cursor-pointer"
+                          onClick={() => setDozentenDialog({ open: true, record: d })}
+                        >
+                          <div className="font-medium text-sm truncate">
+                            {d.fields.dozent_firstname} {d.fields.dozent_lastname}
+                          </div>
+                          <div className="text-xs text-muted-foreground truncate">
+                            {d.fields.fachgebiet ?? ''}{' '}
+                            {d.fields.email ? `· ${d.fields.email}` : ''}
+                          </div>
+                        </div>
+                        <div className="flex gap-1 shrink-0">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={() => setDozentenDialog({ open: true, record: d })}
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-destructive hover:text-destructive"
+                            onClick={() => handleDeleteDozent(d)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 ) : (
-                  <div className="overflow-x-auto">
+                  <div className="border rounded-lg overflow-hidden">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Vorname</TableHead>
+                          <TableHead>Nachname</TableHead>
+                          <TableHead>E-Mail</TableHead>
+                          <TableHead>Telefon</TableHead>
+                          <TableHead>Fachgebiet</TableHead>
+                          <TableHead className="w-20"></TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {sortedDozenten.map((d) => (
+                          <TableRow
+                            key={d.record_id}
+                            className="cursor-pointer hover:bg-muted/50"
+                            onClick={() => setDozentenDialog({ open: true, record: d })}
+                          >
+                            <TableCell className="font-medium">
+                              {d.fields.dozent_firstname ?? '-'}
+                            </TableCell>
+                            <TableCell>{d.fields.dozent_lastname ?? '-'}</TableCell>
+                            <TableCell>{d.fields.email ?? '-'}</TableCell>
+                            <TableCell>{d.fields.telefon ?? '-'}</TableCell>
+                            <TableCell>{d.fields.fachgebiet ?? '-'}</TableCell>
+                            <TableCell>
+                              <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8"
+                                  onClick={() =>
+                                    setDozentenDialog({ open: true, record: d })
+                                  }
+                                >
+                                  <Pencil className="h-3.5 w-3.5" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 text-destructive hover:text-destructive"
+                                  onClick={() => handleDeleteDozent(d)}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </TabsContent>
+
+              {/* ── Raeume Tab ──────────────────────────────────────── */}
+              <TabsContent value="raeume" className="mt-4">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-sm font-medium text-muted-foreground">
+                    {raeume.length} Raeume
+                  </h3>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setRaeumeDialog({ open: true, record: null })}
+                  >
+                    <Plus className="h-4 w-4 mr-1" /> Neu
+                  </Button>
+                </div>
+                {raeume.length === 0 ? (
+                  <EmptyTabState
+                    label="Raeume"
+                    onAdd={() => setRaeumeDialog({ open: true, record: null })}
+                  />
+                ) : isMobile ? (
+                  <div className="space-y-2">
+                    {sortedRaeume.map((r) => (
+                      <div
+                        key={r.record_id}
+                        className="flex items-center justify-between p-3 rounded-lg border bg-card hover:bg-muted/50 transition-colors"
+                      >
+                        <div
+                          className="flex-1 min-w-0 cursor-pointer"
+                          onClick={() => setRaeumeDialog({ open: true, record: r })}
+                        >
+                          <div className="font-medium text-sm truncate">
+                            {r.fields.raumname ?? '-'}
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            {r.fields.gebaeude ?? ''}{' '}
+                            {r.fields.kapazitaet ? `· ${r.fields.kapazitaet} Plaetze` : ''}
+                          </div>
+                        </div>
+                        <div className="flex gap-1 shrink-0">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={() => setRaeumeDialog({ open: true, record: r })}
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-destructive hover:text-destructive"
+                            onClick={() => handleDeleteRaum(r)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="border rounded-lg overflow-hidden">
                     <Table>
                       <TableHeader>
                         <TableRow>
                           <TableHead>Raumname</TableHead>
-                          <TableHead>Gebäude</TableHead>
-                          <TableHead>Kapazität</TableHead>
-                          <TableHead className="w-[80px]" />
+                          <TableHead>Gebaeude</TableHead>
+                          <TableHead>Kapazitaet</TableHead>
+                          <TableHead className="w-20"></TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {raeume.map(r => (
-                          <TableRow key={r.record_id} className="group hover:bg-muted/50 cursor-pointer"
-                            onClick={() => setRaeumeDialog({ open: true, record: r })}>
-                            <TableCell className="font-medium">{r.fields.raumname ?? '–'}</TableCell>
-                            <TableCell className="text-muted-foreground">{r.fields.gebaeude ?? '–'}</TableCell>
-                            <TableCell className="text-muted-foreground">{r.fields.kapazitaet ?? '–'}</TableCell>
+                        {sortedRaeume.map((r) => (
+                          <TableRow
+                            key={r.record_id}
+                            className="cursor-pointer hover:bg-muted/50"
+                            onClick={() => setRaeumeDialog({ open: true, record: r })}
+                          >
+                            <TableCell className="font-medium">
+                              {r.fields.raumname ?? '-'}
+                            </TableCell>
+                            <TableCell>{r.fields.gebaeude ?? '-'}</TableCell>
+                            <TableCell>{r.fields.kapazitaet ?? '-'}</TableCell>
                             <TableCell>
-                              <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <Button variant="ghost" size="icon" className="h-8 w-8"
-                                  onClick={e => { e.stopPropagation(); setRaeumeDialog({ open: true, record: r }); }}>
+                              <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8"
+                                  onClick={() => setRaeumeDialog({ open: true, record: r })}
+                                >
                                   <Pencil className="h-3.5 w-3.5" />
                                 </Button>
-                                <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive"
-                                  onClick={e => { e.stopPropagation(); confirmDeleteRaum(r); }}>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 text-destructive hover:text-destructive"
+                                  onClick={() => handleDeleteRaum(r)}
+                                >
                                   <Trash2 className="h-3.5 w-3.5" />
                                 </Button>
                               </div>
@@ -1154,196 +2041,137 @@ export default function Dashboard() {
                     </Table>
                   </div>
                 )}
-              </CardContent>
-            </Card>
-          </TabsContent>
+              </TabsContent>
+            </Tabs>
+          </div>
 
-          {/* ── Teilnehmer Tab ───────────────────────────────────── */}
-          <TabsContent value="teilnehmer">
-            <Card className="shadow-sm">
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-base font-semibold">Teilnehmer</CardTitle>
-                <Button size="sm" onClick={() => setTeilnehmerDialog({ open: true, record: null })}>
-                  <Plus className="h-4 w-4 mr-1" /> Neu
-                </Button>
+          {/* ─── Right Column: Recent Activity ────────────────────── */}
+          <div className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base font-semibold">Letzte Aktivitaet</CardTitle>
               </CardHeader>
               <CardContent>
-                {teilnehmer.length === 0 ? (
-                  <div className="text-center py-8 space-y-3">
-                    <p className="text-sm text-muted-foreground">Noch keine Teilnehmer vorhanden.</p>
-                    <Button variant="outline" onClick={() => setTeilnehmerDialog({ open: true, record: null })}>
-                      <Plus className="h-4 w-4 mr-1" /> Ersten Teilnehmer hinzufügen
-                    </Button>
-                  </div>
+                {recentActivity.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">Noch keine Aktivitaet.</p>
                 ) : (
-                  <div className="overflow-x-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Vorname</TableHead>
-                          <TableHead>Nachname</TableHead>
-                          <TableHead className="hidden sm:table-cell">E-Mail</TableHead>
-                          <TableHead className="hidden md:table-cell">Geburtsdatum</TableHead>
-                          <TableHead className="w-[80px]" />
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {teilnehmer.map(t => (
-                          <TableRow key={t.record_id} className="group hover:bg-muted/50 cursor-pointer"
-                            onClick={() => setTeilnehmerDialog({ open: true, record: t })}>
-                            <TableCell className="font-medium">{t.fields.teilnehmer_firstname ?? '–'}</TableCell>
-                            <TableCell>{t.fields.teilnehmer_lastname ?? '–'}</TableCell>
-                            <TableCell className="hidden sm:table-cell text-muted-foreground">{t.fields.email ?? '–'}</TableCell>
-                            <TableCell className="hidden md:table-cell text-muted-foreground">{formatDate(t.fields.geburtsdatum)}</TableCell>
-                            <TableCell>
-                              <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <Button variant="ghost" size="icon" className="h-8 w-8"
-                                  onClick={e => { e.stopPropagation(); setTeilnehmerDialog({ open: true, record: t }); }}>
-                                  <Pencil className="h-3.5 w-3.5" />
-                                </Button>
-                                <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive"
-                                  onClick={e => { e.stopPropagation(); confirmDeleteTeilnehmer(t); }}>
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                </Button>
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
+                  <div className="space-y-3">
+                    {recentActivity.map((item, i) => (
+                      <div key={i} className="flex items-start gap-3">
+                        <span className="w-2 h-2 rounded-full bg-primary mt-1.5 shrink-0" />
+                        <div className="min-w-0">
+                          <div className="text-sm font-medium truncate">{item.label}</div>
+                          <div className="text-xs text-muted-foreground">
+                            {item.type} · {formatDate(item.date)}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 )}
               </CardContent>
             </Card>
-          </TabsContent>
 
-          {/* ── Anmeldungen Tab ──────────────────────────────────── */}
-          <TabsContent value="anmeldungen">
-            <Card className="shadow-sm">
-              <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-base font-semibold">Anmeldungen</CardTitle>
-                <Button size="sm" onClick={() => setAnmeldungenDialog({ open: true, record: null })}>
-                  <Plus className="h-4 w-4 mr-1" /> Neu
-                </Button>
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base font-semibold">Raumauslastung</CardTitle>
               </CardHeader>
               <CardContent>
-                {anmeldungen.length === 0 ? (
-                  <div className="text-center py-8 space-y-3">
-                    <p className="text-sm text-muted-foreground">Noch keine Anmeldungen vorhanden.</p>
-                    <Button variant="outline" onClick={() => setAnmeldungenDialog({ open: true, record: null })}>
-                      <Plus className="h-4 w-4 mr-1" /> Erste Anmeldung erstellen
-                    </Button>
-                  </div>
+                {raeume.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">Keine Raeume vorhanden.</p>
                 ) : (
-                  <div className="overflow-x-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Teilnehmer</TableHead>
-                          <TableHead>Kurs</TableHead>
-                          <TableHead className="hidden sm:table-cell">Datum</TableHead>
-                          <TableHead>Bezahlt</TableHead>
-                          <TableHead className="w-[80px]" />
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {[...anmeldungen]
-                          .sort((a, b) => (b.fields.anmeldedatum ?? b.createdat).localeCompare(a.fields.anmeldedatum ?? a.createdat))
-                          .map(a => {
-                            const tId = extractRecordId(a.fields.teilnehmer);
-                            const kId = extractRecordId(a.fields.kurs);
-                            const t = tId ? teilnehmerMap.get(tId) : null;
-                            const k = kId ? kursMap.get(kId) : null;
-                            return (
-                              <TableRow key={a.record_id} className="group hover:bg-muted/50 cursor-pointer"
-                                onClick={() => setAnmeldungenDialog({ open: true, record: a })}>
-                                <TableCell className="font-medium">
-                                  {t ? `${t.fields.teilnehmer_firstname ?? ''} ${t.fields.teilnehmer_lastname ?? ''}`.trim() : '–'}
-                                </TableCell>
-                                <TableCell className="text-muted-foreground">{k?.fields.titel ?? '–'}</TableCell>
-                                <TableCell className="hidden sm:table-cell text-muted-foreground">{formatDate(a.fields.anmeldedatum)}</TableCell>
-                                <TableCell>
-                                  {a.fields.bezahlt ? (
-                                    <Badge className="bg-[hsl(152_50%_38%)] text-white border-0 text-xs">Bezahlt</Badge>
-                                  ) : (
-                                    <Badge className="bg-[hsl(40_70%_55%)] text-white border-0 text-xs">Offen</Badge>
-                                  )}
-                                </TableCell>
-                                <TableCell>
-                                  <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                    <Button variant="ghost" size="icon" className="h-8 w-8"
-                                      onClick={e => { e.stopPropagation(); setAnmeldungenDialog({ open: true, record: a }); }}>
-                                      <Pencil className="h-3.5 w-3.5" />
-                                    </Button>
-                                    <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive"
-                                      onClick={e => { e.stopPropagation(); confirmDeleteAnmeldung(a); }}>
-                                      <Trash2 className="h-3.5 w-3.5" />
-                                    </Button>
-                                  </div>
-                                </TableCell>
-                              </TableRow>
-                            );
-                          })}
-                      </TableBody>
-                    </Table>
-                  </div>
+                  <>
+                    {(() => {
+                      const assignedRoomIds = new Set<string>();
+                      kurse.forEach((k) => {
+                        if (!k.fields.enddatum || k.fields.enddatum.split('T')[0] >= today) {
+                          const rId = extractRecordId(k.fields.raum ?? null);
+                          if (rId) assignedRoomIds.add(rId);
+                        }
+                      });
+                      const usedCount = assignedRoomIds.size;
+                      const totalCount = raeume.length;
+                      const pct = totalCount > 0 ? Math.round((usedCount / totalCount) * 100) : 0;
+                      return (
+                        <div className="space-y-3">
+                          <div className="flex justify-between text-sm">
+                            <span className="text-muted-foreground">Belegte Raeume</span>
+                            <span className="font-medium">
+                              {usedCount} / {totalCount}
+                            </span>
+                          </div>
+                          <div className="h-2 rounded-full bg-muted overflow-hidden">
+                            <div
+                              className="h-full rounded-full bg-primary transition-all"
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                          <p className="text-xs text-muted-foreground">{pct}% Auslastung</p>
+                        </div>
+                      );
+                    })()}
+                  </>
                 )}
               </CardContent>
             </Card>
-          </TabsContent>
-        </Tabs>
+          </div>
+        </div>
       </main>
 
       {/* ─── Mobile Fixed Bottom Action ──────────────────────────── */}
-      <div className="fixed bottom-0 left-0 right-0 p-4 bg-background/80 backdrop-blur-sm border-t border-border sm:hidden z-30">
-        <Button className="w-full h-[52px] text-base font-semibold"
-          onClick={() => setAnmeldungenDialog({ open: true, record: null })}>
-          <Plus className="h-5 w-5 mr-2" /> Neue Anmeldung
-        </Button>
-      </div>
+      {isMobile && (
+        <div className="fixed bottom-0 left-0 right-0 p-4 bg-background/95 backdrop-blur border-t border-border z-30">
+          <Button
+            className="w-full h-12 text-base shadow-md"
+            onClick={() => setAnmeldungenDialog({ open: true, record: null })}
+          >
+            <Plus className="h-5 w-5 mr-2" />
+            Neue Anmeldung
+          </Button>
+        </div>
+      )}
 
-      {/* ─── Spacer for mobile bottom bar ────────────────────────── */}
-      <div className="h-20 sm:hidden" />
-
-      {/* ─── CRUD Dialogs ────────────────────────────────────────── */}
+      {/* ─── All CRUD Dialogs ────────────────────────────────────── */}
       <RaeumeDialog
         open={raeumeDialog.open}
-        onOpenChange={o => setRaeumeDialog(p => ({ ...p, open: o }))}
+        onOpenChange={(open) => setRaeumeDialog((p) => ({ ...p, open }))}
         record={raeumeDialog.record}
         onSuccess={refreshRaeume}
       />
       <DozentenDialog
         open={dozentenDialog.open}
-        onOpenChange={o => setDozentenDialog(p => ({ ...p, open: o }))}
+        onOpenChange={(open) => setDozentenDialog((p) => ({ ...p, open }))}
         record={dozentenDialog.record}
         onSuccess={refreshDozenten}
       />
       <KurseDialog
         open={kurseDialog.open}
-        onOpenChange={o => setKurseDialog(p => ({ ...p, open: o }))}
+        onOpenChange={(open) => setKurseDialog((p) => ({ ...p, open }))}
         record={kurseDialog.record}
         onSuccess={refreshKurse}
-        raeume={raeume}
         dozenten={dozenten}
+        raeume={raeume}
       />
       <TeilnehmerDialog
         open={teilnehmerDialog.open}
-        onOpenChange={o => setTeilnehmerDialog(p => ({ ...p, open: o }))}
+        onOpenChange={(open) => setTeilnehmerDialog((p) => ({ ...p, open }))}
         record={teilnehmerDialog.record}
         onSuccess={refreshTeilnehmer}
       />
       <AnmeldungenDialog
         open={anmeldungenDialog.open}
-        onOpenChange={o => setAnmeldungenDialog(p => ({ ...p, open: o }))}
+        onOpenChange={(open) => setAnmeldungenDialog((p) => ({ ...p, open }))}
         record={anmeldungenDialog.record}
         onSuccess={refreshAnmeldungen}
         teilnehmer={teilnehmer}
         kurse={kurse}
       />
+
+      {/* ─── Delete Confirmation ─────────────────────────────────── */}
       <DeleteConfirmDialog
         open={deleteDialog.open}
-        onOpenChange={o => setDeleteDialog(p => ({ ...p, open: o }))}
-        name={deleteDialog.name}
+        onOpenChange={(open) => setDeleteDialog((p) => ({ ...p, open }))}
+        recordName={deleteDialog.name}
         onConfirm={deleteDialog.onConfirm}
       />
     </div>

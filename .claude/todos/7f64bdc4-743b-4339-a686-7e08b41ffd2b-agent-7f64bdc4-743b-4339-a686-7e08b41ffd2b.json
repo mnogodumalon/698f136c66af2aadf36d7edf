@@ -1,0 +1,37 @@
+[
+  {
+    "content": "Analyze app metadata and existing codebase",
+    "status": "completed",
+    "activeForm": "Analyzing app metadata and existing codebase"
+  },
+  {
+    "content": "Create design brief using frontend-design skill",
+    "status": "completed",
+    "activeForm": "Creating design brief"
+  },
+  {
+    "content": "Update index.css with theme variables",
+    "status": "completed",
+    "activeForm": "Updating CSS theme variables"
+  },
+  {
+    "content": "Update index.html with font and language",
+    "status": "completed",
+    "activeForm": "Updating index.html"
+  },
+  {
+    "content": "Implement Dashboard.tsx",
+    "status": "completed",
+    "activeForm": "Implementing Dashboard.tsx"
+  },
+  {
+    "content": "Build and fix any errors",
+    "status": "completed",
+    "activeForm": "Building and fixing errors"
+  },
+  {
+    "content": "Deploy to GitHub",
+    "status": "in_progress",
+    "activeForm": "Deploying to GitHub"
+  }
+]
