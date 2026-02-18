@@ -1,97 +1,139 @@
 # Design Brief: Kursverwaltung Dashboard
 
 ## 1. App Analysis
-A course management system for educational institutions to manage rooms, instructors, courses, participants, and enrollments. The primary user is an administrator at a language school, training center, or vocational institute who needs to see an overview of all running courses, manage registrations, and track payments. The ONE thing users care about most is knowing the current state of their courses — how many people are enrolled, who's teaching what, and whether fees have been paid. Primary actions: adding courses, enrolling participants, marking payments as paid.
+A comprehensive course management dashboard for educational institutions or training centers. Administrators can manage courses, instructors, rooms, participants, and registrations all in one place.
+
+**Who uses this:** Course administrators, training coordinators, academic staff
+**The ONE thing users care about most:** Quick overview of active courses and enrollments
+**Primary actions:** Register participants to courses, create new courses, manage instructor assignments
 
 ## 2. What Makes This Design Distinctive
-- **Visual identity:** Deep teal-indigo with warm cream background. Professional yet approachable — like a well-designed appointment book brought to life digitally. Structured but not sterile.
-- **Layout strategy:** Navigation sidebar (desktop) / bottom tab bar (mobile). Main content area with a dashboard overview as home. Each section is a full page, not nested modals.
-- **Unique element:** Enrollment cards show a mini progress bar indicating how full a course is (enrolled/max_teilnehmer), with the bar color shifting from teal (low) to amber (near full) to rose (full).
+- **Visual identity:** Deep navy/slate base with warm amber accents — professional yet inviting, like a premium university portal
+- **Layout strategy:** Hero card showing total active courses and enrollments, asymmetric grid with courses prominent, side panels for quick actions
+- **Unique element:** Course cards with subtle gradient progress bars showing enrollment capacity
 
 ## 3. Theme & Colors
-- **Font:** Plus Jakarta Sans (Google Fonts) — professional, warm, excellent weight range. Pairs well with educational/administrative contexts.
-- **Google Fonts URL:** https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap
-- **Color palette (HSL):**
-  - Background: hsl(220, 25%, 97%) — warm blue-tinted white
-  - Surface (cards): hsl(0, 0%, 100%) with subtle shadow
-  - Primary: hsl(220, 62%, 44%) — deep trust-blue
-  - Primary light: hsl(220, 80%, 96%) — very light blue tint
-  - Primary glow: hsl(220, 55%, 60%) — lighter blue for gradients
-  - Accent: hsl(172, 58%, 39%) — teal for success/highlights
-  - Accent light: hsl(172, 80%, 95%)
-  - Amber: hsl(38, 95%, 52%) — for warnings / near-full
-  - Rose: hsl(356, 80%, 56%) — for danger / paid status
-  - Foreground: hsl(222, 25%, 12%)
-  - Muted text: hsl(222, 15%, 52%)
-  - Border: hsl(220, 20%, 91%)
-- **Background treatment:** Solid warm off-white with subtle gradient on hero stats
+- **Font:** Plus Jakarta Sans — geometric, modern, highly readable, perfect for data-heavy interfaces
+- **Google Fonts:** https://fonts.google.com/specimen/Plus+Jakarta+Sans
+
+**Color palette:**
+- Background: `hsl(222 47% 97%)` — cool off-white with blue undertone
+- Foreground: `hsl(222 47% 11%)` — deep navy for text
+- Primary: `hsl(35 95% 55%)` — warm amber for accents and CTAs
+- Primary foreground: `hsl(222 47% 11%)` — dark text on amber
+- Secondary: `hsl(222 30% 93%)` — muted blue-gray for cards
+- Muted: `hsl(222 20% 85%)` — subtle borders/dividers
+- Accent: `hsl(162 73% 46%)` — teal green for success states
+- Destructive: `hsl(0 84% 60%)` — red for warnings
 
 ## 4. Mobile Layout
-- Bottom navigation bar with icons for: Overview, Kurse, Anmeldungen, Teilnehmer, Mehr (sheet with Dozenten + Räume)
-- Stack layout: header with title → KPI hero row (horizontal scroll) → section content
-- Touch targets: 44px minimum for all interactive elements
-- Floating action button (FAB) for primary "Neu hinzufügen" action on each section
+- Single column, vertical scroll
+- Hero KPI (Active Courses count) at top with enrollment stat
+- Tabbed navigation: Kurse | Dozenten | Räume | Teilnehmer
+- Course cards stack vertically with full-width touch targets
+- Floating action button bottom-right for "Neue Anmeldung"
 
 ## 5. Desktop Layout
-- Left sidebar (240px): Logo + navigation items with icons
-- Main content: Full remaining width
-- KPI cards: 4-column grid at top
-- Below KPIs: 2-column layout — left for primary entity list, right for contextual info
-- Hover states: Card lift (translateY -2px) + enhanced shadow
+- **Left side (65%):** Course grid with 2-column layout, hero stats bar at top
+- **Right side (35%):** Quick actions panel, recent activity, upcoming courses
+- Bottom section: Tabbed tables for Dozenten, Räume, Teilnehmer
+- Hover states reveal quick edit/delete actions on cards
 
 ## 6. Components
-- **Hero KPI:** "Aktive Kurse" displayed large with trend indicator
-- **Secondary KPIs:** Teilnehmer gesamt, Anmeldungen heute, Offene Zahlungen (as colored badge count)
-- **Charts:** Simple bar chart for enrollment by course (recharts), line for monthly revenue
-- **Course list table:** Title, Dozent, Raum, dates, Belegung (progress bar), actions
-- **Primary Action Button:** "+ Kurs hinzufügen" / "+ Anmeldung" etc. per section — prominent teal button
+
+### Hero KPI Section
+- Large number showing active courses count
+- Secondary stats: Total Teilnehmer, Anmeldungen this month, Available capacity
+- Subtle gradient background with brand colors
+
+### Course Cards
+- Title prominently displayed (font-weight 600)
+- Instructor badge with avatar placeholder
+- Date range with calendar icon
+- Enrollment progress bar (current/max)
+- Price displayed with Euro symbol
+- Room tag with building info
+
+### Instructor List
+- Avatar circle with initials
+- Name, specialty as subtitle
+- Email/phone on hover or expand
+
+### Quick Actions Panel
+- "Neue Anmeldung" primary button
+- "Kurs erstellen" secondary
+- "Teilnehmer hinzufügen" secondary
+
+### Tables
+- Sortable columns
+- Inline edit capability
+- Row selection for bulk actions
 
 ## 7. Visual Details
-- Border radius: 12px for cards, 8px for inputs, 6px for badges
-- Shadows: `0 1px 3px hsl(220 62% 44% / 0.08), 0 4px 12px hsl(220 62% 44% / 0.06)`
-- Hover shadow: `0 4px 20px hsl(220 62% 44% / 0.15)`
-- Animations: `transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1)` for all interactive elements
-- Entry animation: `animate-in fade-in slide-in-from-bottom-4 duration-300` for page content
-- Progress bars: rounded-full, height 6px, smooth fill animation
-- Badges: Small, pill-shaped, colored background with matching text
+- Border radius: `0.75rem` for cards, `0.5rem` for buttons, `9999px` for badges
+- Shadows: Soft elevation `0 4px 20px hsl(222 47% 11% / 0.08)`
+- Spacing: 8px grid system, 24px card padding, 16px gaps
+- Animations: 200ms ease-out for hovers, 300ms for modals
 
-## 8. CSS Variables (copy exactly into index.css)
+## 8. CSS Variables
+
 ```css
 :root {
   --radius: 0.75rem;
-  --background: hsl(220, 25%, 97%);
-  --foreground: hsl(222, 25%, 12%);
-  --card: hsl(0, 0%, 100%);
-  --card-foreground: hsl(222, 25%, 12%);
-  --popover: hsl(0, 0%, 100%);
-  --popover-foreground: hsl(222, 25%, 12%);
-  --primary: hsl(220, 62%, 44%);
-  --primary-foreground: hsl(0, 0%, 100%);
-  --primary-light: hsl(220, 80%, 96%);
-  --primary-glow: hsl(220, 55%, 60%);
-  --secondary: hsl(220, 20%, 95%);
-  --secondary-foreground: hsl(222, 25%, 12%);
-  --muted: hsl(220, 20%, 95%);
-  --muted-foreground: hsl(222, 15%, 52%);
-  --accent: hsl(172, 58%, 39%);
-  --accent-foreground: hsl(0, 0%, 100%);
-  --accent-light: hsl(172, 80%, 95%);
-  --amber: hsl(38, 95%, 52%);
-  --amber-light: hsl(38, 100%, 94%);
-  --destructive: hsl(356, 80%, 56%);
-  --destructive-light: hsl(356, 100%, 96%);
-  --border: hsl(220, 20%, 91%);
-  --input: hsl(220, 20%, 91%);
-  --ring: hsl(220, 62%, 44%);
 
-  --shadow-card: 0 1px 3px hsl(220 62% 44% / 0.08), 0 4px 12px hsl(220 62% 44% / 0.06);
-  --shadow-hover: 0 4px 20px hsl(220 62% 44% / 0.15);
-  --shadow-elevated: 0 8px 40px hsl(220 62% 44% / 0.2);
+  /* Base colors */
+  --background: 222 47% 97%;
+  --foreground: 222 47% 11%;
 
-  --gradient-hero: linear-gradient(135deg, hsl(220, 62%, 44%), hsl(220, 55%, 60%));
-  --gradient-accent: linear-gradient(135deg, hsl(172, 58%, 39%), hsl(172, 55%, 55%));
-  --gradient-surface: linear-gradient(180deg, hsl(220, 25%, 97%), hsl(220, 20%, 99%));
+  /* Primary - Warm Amber */
+  --primary: 35 95% 55%;
+  --primary-foreground: 222 47% 11%;
+  --primary-glow: 35 95% 70%;
 
-  --transition-smooth: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  /* Secondary */
+  --secondary: 222 30% 93%;
+  --secondary-foreground: 222 47% 20%;
+
+  /* Muted */
+  --muted: 222 20% 92%;
+  --muted-foreground: 222 15% 45%;
+
+  /* Accent - Teal */
+  --accent: 162 73% 46%;
+  --accent-foreground: 162 80% 15%;
+
+  /* Cards */
+  --card: 0 0% 100%;
+  --card-foreground: 222 47% 11%;
+
+  /* Popover */
+  --popover: 0 0% 100%;
+  --popover-foreground: 222 47% 11%;
+
+  /* Destructive */
+  --destructive: 0 84% 60%;
+
+  /* Borders & Input */
+  --border: 222 20% 88%;
+  --input: 222 20% 88%;
+  --ring: 35 95% 55%;
+
+  /* Charts */
+  --chart-1: 35 95% 55%;
+  --chart-2: 162 73% 46%;
+  --chart-3: 222 47% 45%;
+  --chart-4: 280 60% 55%;
+  --chart-5: 195 75% 50%;
+
+  /* Gradients */
+  --gradient-hero: linear-gradient(135deg, hsl(222 47% 15%) 0%, hsl(222 47% 25%) 100%);
+  --gradient-card-hover: linear-gradient(180deg, hsl(0 0% 100%) 0%, hsl(222 30% 98%) 100%);
+  --gradient-primary: linear-gradient(135deg, hsl(35 95% 55%) 0%, hsl(35 95% 65%) 100%);
+
+  /* Shadows */
+  --shadow-sm: 0 2px 8px hsl(222 47% 11% / 0.04);
+  --shadow-md: 0 4px 20px hsl(222 47% 11% / 0.08);
+  --shadow-lg: 0 8px 40px hsl(222 47% 11% / 0.12);
+  --shadow-glow: 0 0 30px hsl(35 95% 55% / 0.3);
 }
 ```
