@@ -4,6 +4,10 @@ from claude_agent_sdk import ClaudeSDKClient, ClaudeAgentOptions, AssistantMessa
 import subprocess
 import os
 
+# Environment-specific configuration
+LA_API_URL = os.getenv("LA_API_URL", "https://my.living-apps.de/rest")
+LA_FRONTEND_URL = os.getenv("LA_FRONTEND_URL", "https://my.living-apps.de")
+
 async def main():
     # Skills and CLAUDE.md are loaded automatically by Claude SDK from cwd
     # No manual instruction loading needed - the SDK reads:
@@ -75,84 +79,11 @@ async def main():
             
             print("[DEPLOY] ✅ Push erfolgreich!")
             
-            # Ab hier: Warte auf Dashboard und aktiviere Links
-            if livingapps_api_key and appgroup_id:
-                import httpx
-                import time
-                
-                headers = {
-                    "X-API-Key": livingapps_api_key,
-                    "Accept": "application/json",
-                    "Content-Type": "application/json"
-                }
-                
-                try:
-                    # 1. Hole alle App-IDs der Appgroup
-                    print(f"[DEPLOY] Lade Appgroup: {appgroup_id}")
-                    resp = httpx.get(
-                        f"https://my.living-apps.de/rest/appgroups/{appgroup_id}",
-                        headers=headers,
-                        timeout=30
-                    )
-                    resp.raise_for_status()
-                    appgroup = resp.json()
-                    
-                    app_ids = [app_data["id"] for app_data in appgroup.get("apps", {}).values()]
-                    print(f"[DEPLOY] Gefunden: {len(app_ids)} Apps")
-                    
-                    if not app_ids:
-                        print("[DEPLOY] ⚠️ Keine Apps gefunden")
-                        return {"content": [{"type": "text", "text": "✅ Deployment erfolgreich!"}]}
-                    
-                    dashboard_url = f"https://my.living-apps.de/github/{appgroup_id}/"
-                    
-                    # 2. Warte bis Dashboard verfügbar ist
-                    print(f"[DEPLOY] ⏳ Warte auf Dashboard: {dashboard_url}")
-                    max_attempts = 180  # Max 180 Sekunden warten
-                    for attempt in range(max_attempts):
-                        try:
-                            check_resp = httpx.get(dashboard_url, timeout=5)
-                            if check_resp.status_code == 200:
-                                print(f"[DEPLOY] ✅ Dashboard ist verfügbar!")
-                                break
-                        except:
-                            pass
-                        
-                        if attempt < max_attempts - 1:
-                            time.sleep(1)
-                        else:
-                            print("[DEPLOY] ⚠️ Timeout - Dashboard nicht erreichbar")
-                            return {"content": [{"type": "text", "text": "✅ Deployment erfolgreich! Dashboard-Links konnten nicht aktiviert werden."}]}
-                    
-                    # 3. Aktiviere Dashboard-Links
-                    print("[DEPLOY] 🎉 Aktiviere Dashboard-Links...")
-                    for app_id in app_ids:
-                        try:
-                            # URL aktivieren
-                            httpx.put(
-                                f"https://my.living-apps.de/rest/apps/{app_id}/params/la_page_header_additional_url",
-                                headers=headers,
-                                json={"description": "dashboard_url", "type": "string", "value": dashboard_url},
-                                timeout=10
-                            )
-                            # Title aktualisieren
-                            httpx.put(
-                                f"https://my.living-apps.de/rest/apps/{app_id}/params/la_page_header_additional_title",
-                                headers=headers,
-                                json={"description": "dashboard_title", "type": "string", "value": "Dashboard"},
-                                timeout=10
-                            )
-                            print(f"[DEPLOY]   ✓ App {app_id} aktiviert")
-                        except Exception as e:
-                            print(f"[DEPLOY]   ✗ App {app_id}: {e}")
-                    
-                    print("[DEPLOY] ✅ Dashboard-Links erfolgreich hinzugefügt!")
-                    
-                except Exception as e:
-                    print(f"[DEPLOY] ⚠️ Fehler beim Hinzufügen der Dashboard-Links: {e}")
+            # Dashboard-Link-Aktivierung wird vom Service übernommen (hat VPN-Zugriff)
+            print("[DEPLOY] ℹ️ Dashboard-Links werden vom Service aktiviert")
 
             return {
-                "content": [{"type": "text", "text": "✅ Deployment erfolgreich! Code wurde gepusht und Dashboard-Links hinzugefügt."}]
+                "content": [{"type": "text", "text": "✅ Deployment erfolgreich! Code wurde gepusht."}]
             }
 
         except Exception as e:
@@ -178,7 +109,7 @@ async def main():
         "mcp__deploy_tools__deploy_to_github"
         ],
         cwd="/home/user/app",
-        model="claude-opus-4-6", #"claude-sonnet-4-5-20250929"
+        model="claude-sonnet-4-6" #"claude-opus-4-5-20251101", #"claude-sonnet-4-5-20250929"
     )
 
     # Session-Resume Unterstützung
