@@ -35,10 +35,12 @@
     "tengu_streaming_tool_execution2": true,
     "tengu_tool_search_unsupported_models": [
       "haiku"
-    ]
+    ],
+    "tengu_attribution_header": false,
+    "tengu_workout2": true
   },
-  "firstStartTime": "2026-02-18T10:27:30.803Z",
-  "userID": "c785406fb5efba2dfc6840213038cfb395b7b519bd1f5b0514936b83351fc8ce",
+  "firstStartTime": "2026-02-18T10:39:22.807Z",
+  "userID": "277f67fca5994535ca70c0936ac7ecaee88b73e182034ff1a4ac26f48a661757",
   "sonnet45MigrationComplete": true,
   "opus45MigrationComplete": true,
   "opusProMigrationComplete": true,
@@ -46,6 +48,6 @@
   "penguinModeOrgEnabled": true,
   "clientDataCache": {
     "data": null,
-    "timestamp": 1771410452629
+    "timestamp": 1771411164647
   }
 }

@@ -3,12 +3,50 @@ import json
 from claude_agent_sdk import ClaudeSDKClient, ClaudeAgentOptions, AssistantMessage, ToolUseBlock, TextBlock, ResultMessage, create_sdk_mcp_server, tool
 import subprocess
 import os
+from pathlib import Path
 
 async def main():
     # Skills and CLAUDE.md are loaded automatically by Claude SDK from cwd
     # No manual instruction loading needed - the SDK reads:
     # - /home/user/app/CLAUDE.md (copied from SANDBOX_PROMPT.md)
     # - /home/user/app/.claude/skills/ (copied from sandbox_skills/)
+
+    # ============================================================
+    # HELPER: Sort apps by dependencies for LivingApps creation
+    # ============================================================
+    def sort_apps_by_dependencies(apps):
+        """Sort apps so those without applookup dependencies come first."""
+        dependencies = {}
+        app_map = {}
+        
+        for app in apps:
+            identifier = app["identifier"]
+            app_map[identifier] = app
+            dependencies[identifier] = set()
+            
+            for ctrl in app.get("controls", {}).values():
+                if "applookup" in ctrl.get("fulltype", ""):
+                    ref = ctrl.get("lookup_app_ref")
+                    if ref:
+                        dependencies[identifier].add(ref)
+        
+        # Topological sort (Kahn's algorithm)
+        sorted_apps = []
+        in_degree = {app_id: len(deps) for app_id, deps in dependencies.items()}
+        queue = [app_id for app_id, degree in in_degree.items() if degree == 0]
+        
+        while queue:
+            current = queue.pop(0)
+            if current in app_map:
+                sorted_apps.append(app_map[current])
+            
+            for app_id, deps in dependencies.items():
+                if current in deps:
+                    in_degree[app_id] -= 1
+                    if in_degree[app_id] == 0:
+                        queue.append(app_id)
+        
+        return sorted_apps if len(sorted_apps) == len(apps) else apps
 
     def run_git_cmd(cmd: str):
         """Executes a Git command and throws an error on failure"""
@@ -158,10 +196,282 @@ async def main():
         except Exception as e:
             return {"content": [{"type": "text", "text": f"Deployment Failed: {str(e)}"}], "is_error": True}
 
-    deployment_server = create_sdk_mcp_server(
-        name="deployment",
+    # ============================================================
+    # NEW TOOL: create_apps
+    # Creates LivingApps apps from JSON specification
+    # Supports adding to existing apps (merges with app_metadata.json)
+    # ============================================================
+    @tool("create_apps",
+        "Create LivingApps apps from a JSON specification. Call this AFTER building UI with mock data to add real data persistence. "
+        "Returns metadata that you should pass to generate_typescript. "
+        "Apps are created in dependency order (apps without applookup first). "
+        "If apps already exist (app_metadata.json), new apps are ADDED to existing ones.",
+        {
+            "type": "object",
+            "properties": {
+                "apps": {
+                    "type": "array",
+                    "description": "Array of app definitions",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string", "description": "Display name for the app"},
+                            "identifier": {"type": "string", "description": "snake_case identifier (e.g. 'employees')"},
+                            "controls": {"type": "object", "description": "Field definitions with fulltype, label, etc."}
+                        },
+                        "required": ["name", "identifier", "controls"]
+                    }
+                }
+            },
+            "required": ["apps"]
+        }
+    )
+    async def create_apps(args):
+        """Create LivingApps apps and return metadata for TypeScript generation."""
+        import httpx
+        
+        apps = args.get("apps", [])
+        api_key = os.environ.get("LIVINGAPPS_API_KEY")
+        api_url = "https://my.living-apps.de/rest"
+        
+        if not apps:
+            return {"content": [{"type": "text", "text": "Error: No apps specified"}], "is_error": True}
+        
+        if not api_key:
+            return {"content": [{"type": "text", "text": "Error: LIVINGAPPS_API_KEY not set"}], "is_error": True}
+        
+        # Load existing metadata if present (to support adding apps later)
+        existing_apps = {}
+        existing_identifier_to_id = {}
+        metadata_path = Path("app_metadata.json")
+        
+        if metadata_path.exists():
+            try:
+                with open(metadata_path, "r") as f:
+                    existing_metadata = json.load(f)
+                    existing_apps = existing_metadata.get("apps", {})
+                    # Build reverse lookup: identifier -> app_id
+                    for identifier, app_data in existing_apps.items():
+                        existing_identifier_to_id[identifier] = app_data["app_id"]
+                    print(f"[LIVINGAPPS] 📂 Found {len(existing_apps)} existing apps, will add new ones")
+            except Exception as e:
+                print(f"[LIVINGAPPS] ⚠️ Could not read existing metadata: {e}")
+        
+        # Filter out apps that already exist
+        new_apps = [app for app in apps if app["identifier"] not in existing_apps]
+        
+        if not new_apps:
+            print("[LIVINGAPPS] ℹ️ All apps already exist, nothing to create")
+            # Return existing metadata
+            metadata = {
+                "appgroup_id": None,
+                "appgroup_name": "Auto-Generated",
+                "apps": existing_apps,
+                "metadata": {"apps_list": [app["name"] for app in existing_apps.values()]}
+            }
+            return {
+                "content": [{
+                    "type": "text",
+                    "text": json.dumps({
+                        "success": True,
+                        "message": "All apps already exist, no new apps created",
+                        "existing_apps": list(existing_apps.keys()),
+                        "metadata": metadata
+                    }, indent=2)
+                }]
+            }
+        
+        print(f"[LIVINGAPPS] 🏗️ Creating {len(new_apps)} new apps...")
+        
+        # Sort by dependencies (apps without applookup first)
+        sorted_apps = sort_apps_by_dependencies(new_apps)
+        
+        # Start with existing apps data
+        created = dict(existing_apps)
+        identifier_to_id = dict(existing_identifier_to_id)
+        newly_created = []
+        
+        async with httpx.AsyncClient() as client:
+            for app_def in sorted_apps:
+                identifier = app_def["identifier"]
+                
+                # Build controls for API
+                controls = {}
+                for ctrl_name, ctrl in app_def.get("controls", {}).items():
+                    ctrl_data = {
+                        "fulltype": ctrl["fulltype"],
+                        "label": ctrl["label"],
+                        "required": ctrl.get("required", False),
+                        "in_list": ctrl.get("in_list", False),
+                        "in_text": ctrl.get("in_text", False),
+                    }
+                    
+                    # Convert lookups array to dict format
+                    # plan.md uses: [{"key": "x", "value": "Y"}]
+                    # LivingApps API expects: {"x": "Y"}
+                    if "lookups" in ctrl:
+                        lookups = ctrl["lookups"]
+                        if isinstance(lookups, list):
+                            ctrl_data["lookups"] = {item["key"]: item["value"] for item in lookups}
+                        else:
+                            ctrl_data["lookups"] = lookups
+                    
+                    # Resolve applookup references to real app URLs
+                    # Check both existing and newly created apps
+                    if "applookup" in ctrl.get("fulltype", ""):
+                        ref = ctrl.get("lookup_app_ref")
+                        if ref and ref in identifier_to_id:
+                            ctrl_data["lookup_app"] = f"{api_url}/apps/{identifier_to_id[ref]}"
+                    
+                    controls[ctrl_name] = ctrl_data
+                
+                # Create app via LivingApps REST API
+                try:
+                    print(f"[LIVINGAPPS] Creating: {app_def['name']}...")
+                    response = await client.post(
+                        f"{api_url}/apps",
+                        json={"name": app_def["name"], "controls": controls},
+                        headers={"X-API-Key": api_key, "Content-Type": "application/json"},
+                        timeout=60
+                    )
+                    response.raise_for_status()
+                    result = response.json()
+                    
+                    app_id = result["id"]
+                    identifier_to_id[identifier] = app_id
+                    created[identifier] = {
+                        "app_id": app_id,
+                        "name": app_def["name"],
+                        "controls": result.get("controls", {})
+                    }
+                    newly_created.append(identifier)
+                    print(f"[LIVINGAPPS] ✅ Created: {app_def['name']} ({app_id})")
+                    
+                except httpx.HTTPStatusError as e:
+                    error_msg = f"Error creating '{app_def['name']}': {e.response.text}"
+                    print(f"[LIVINGAPPS] ❌ {error_msg}")
+                    return {
+                        "content": [{"type": "text", "text": error_msg}],
+                        "is_error": True
+                    }
+                except Exception as e:
+                    error_msg = f"Error creating '{app_def['name']}': {str(e)}"
+                    print(f"[LIVINGAPPS] ❌ {error_msg}")
+                    return {
+                        "content": [{"type": "text", "text": error_msg}],
+                        "is_error": True
+                    }
+        
+        # Build combined metadata (existing + new apps)
+        metadata = {
+            "appgroup_id": None,
+            "appgroup_name": "Auto-Generated",
+            "apps": created,
+            "metadata": {"apps_list": [app["name"] for app in created.values()]}
+        }
+        
+        # Save metadata to file for future reference
+        try:
+            with open("app_metadata.json", "w") as f:
+                json.dump(metadata, f, indent=2)
+            print("[LIVINGAPPS] 💾 Saved app_metadata.json")
+        except Exception as e:
+            print(f"[LIVINGAPPS] ⚠️ Could not save metadata: {e}")
+        
+        print(f"[LIVINGAPPS] ✅ Created {len(newly_created)} new apps! Total apps: {len(created)}")
+        
+        return {
+            "content": [{
+                "type": "text",
+                "text": json.dumps({
+                    "success": True,
+                    "message": f"Created {len(newly_created)} new LivingApps apps",
+                    "apps_created": newly_created,
+                    "existing_apps": list(existing_apps.keys()),
+                    "total_apps": list(created.keys()),
+                    "metadata": metadata
+                }, indent=2)
+            }]
+        }
+
+    # ============================================================
+    # NEW TOOL: generate_typescript
+    # Generates TypeScript types and service from app metadata
+    # ============================================================
+    @tool("generate_typescript",
+        "Generate TypeScript types and service from app metadata. "
+        "Call this AFTER create_apps with the metadata it returned. "
+        "Creates src/types/app.ts and src/services/livingAppsService.ts with type-safe CRUD operations.",
+        {
+            "type": "object",
+            "properties": {
+                "metadata": {
+                    "type": "object",
+                    "description": "The metadata object returned from create_apps (contains apps with app_id, name, controls)"
+                }
+            },
+            "required": ["metadata"]
+        }
+    )
+    async def generate_typescript(args):
+        """Generate TypeScript files from app metadata."""
+        metadata = args.get("metadata")
+        
+        if not metadata:
+            return {"content": [{"type": "text", "text": "Error: No metadata provided"}], "is_error": True}
+        
+        print("[TYPESCRIPT] 📝 Generating TypeScript types and service...")
+        
+        try:
+            # Import the generator (copied to sandbox by sandbox.py)
+            from typescript_generator import TypeScriptGenerator
+            
+            generator = TypeScriptGenerator(metadata)
+            types_code = generator.generate_types()
+            service_code = generator.generate_service()
+            
+            # Ensure directories exist
+            Path("src/types").mkdir(parents=True, exist_ok=True)
+            Path("src/services").mkdir(parents=True, exist_ok=True)
+            
+            # Write files
+            with open("src/types/app.ts", "w") as f:
+                f.write(types_code)
+            
+            with open("src/services/livingAppsService.ts", "w") as f:
+                f.write(service_code)
+            
+            print("[TYPESCRIPT] ✅ Generated src/types/app.ts")
+            print("[TYPESCRIPT] ✅ Generated src/services/livingAppsService.ts")
+            
+            # List what was generated
+            app_names = list(metadata.get("apps", {}).keys())
+            
+            return {
+                "content": [{
+                    "type": "text",
+                    "text": f"TypeScript files generated successfully!\n\nFiles created:\n- src/types/app.ts\n- src/services/livingAppsService.ts\n\nGenerated types for: {', '.join(app_names)}\n\nYou can now import and use:\n- Types: import type {{ {', '.join([name.title() for name in app_names])} }} from '@/types/app'\n- Service: import {{ LivingAppsService }} from '@/services/livingAppsService'"
+                }]
+            }
+            
+        except ImportError:
+            return {
+                "content": [{"type": "text", "text": "Error: typescript_generator.py not found in sandbox. Make sure it was copied."}],
+                "is_error": True
+            }
+        except Exception as e:
+            return {
+                "content": [{"type": "text", "text": f"Error generating TypeScript: {str(e)}"}],
+                "is_error": True
+            }
+
+    # ============================================================
+    # CREATE MCP SERVER WITH ALL TOOLS
+    # ============================================================
+    dashboard_tools_server = create_sdk_mcp_server(
+        name="dashboard_tools",
         version="1.0.0",
-        tools=[deploy_to_github]
+        tools=[deploy_to_github, create_apps, generate_typescript]
     )
 
     # 3. Optionen konfigurieren
@@ -172,13 +482,16 @@ async def main():
             "preset": "claude_code"
         },
         setting_sources=["project"],  # Required: loads CLAUDE.md and .claude/skills/
-        mcp_servers={"deploy_tools": deployment_server},
+        mcp_servers={"dashboard_tools": dashboard_tools_server},
         permission_mode="acceptEdits",
-        allowed_tools=["Bash", "Write", "Read", "Edit", "Glob", "Grep", "Task", "TodoWrite",
-        "mcp__deploy_tools__deploy_to_github"
+        allowed_tools=[
+            "Bash", "Write", "Read", "Edit", "Glob", "Grep", "Task", "TodoWrite",
+            "mcp__dashboard_tools__deploy_to_github",
+            "mcp__dashboard_tools__create_apps",
+            "mcp__dashboard_tools__generate_typescript"
         ],
         cwd="/home/user/app",
-        model="claude-opus-4-6", #"claude-sonnet-4-5-20250929"
+        model="claude-sonnet-4-6"#"claude-opus-4-5-20251101", #"claude-sonnet-4-5-20250929"
     )
 
     # Session-Resume Unterstützung
@@ -231,13 +544,23 @@ Starte JETZT mit Schritt 1!"""
         print(f"[LILO] Continue-Mode mit User-Prompt: {user_prompt}")
     else:
         # Normal-Mode: Neues Dashboard bauen
-        query = (
-            "Use frontend-design Skill to create analyse app structure and generate design_brief.md"
-            "Build the Dashboard.tsx following design_brief.md exactly. "
-            "Use existing types and services from src/types/ and src/services/. "
-            "Deploy when done using the deploy_to_github tool."
-        )
-        print(f"[LILO] Build-Mode: Neues Dashboard erstellen")
+        # Check if we need to create apps (no app_metadata.json means fresh start)
+        has_existing_metadata = Path("app_metadata.json").exists()
+        has_existing_types = Path("src/types/app.ts").exists()
+        
+        if has_existing_metadata and has_existing_types:
+            # Mode A: Existing apps - just build UI using them
+            query = (
+                "Use frontend-design Skill to analyze app structure and generate design_brief.md. "
+                "Build the Dashboard.tsx following design_brief.md exactly. "
+                "Use existing types and services from src/types/ and src/services/. "
+                "Deploy when done using mcp__dashboard_tools__deploy_to_github."
+            )
+            print(f"[LILO] Build-Mode: Dashboard mit existierenden Apps erstellen")
+        else:
+            # Mode B: No apps yet - SANDBOX_PROMPT.md (CLAUDE.md) contains all instructions
+            query = os.getenv('USER_PROMPT', 'Build a beautiful dashboard')
+            print(f"[LILO] Build-Mode: Neues Dashboard (nur CLAUDE.md)")
 
     print(f"[LILO] Initialisiere Client")
 
